@@ -54,6 +54,9 @@ class StatsManager: ObservableObject {
     // Disk monitoring state  
     private var previousDiskStats: (bytesRead: UInt64, bytesWritten: UInt64) = (0, 0)
     
+    // CPU Usage History
+    private var previousProcessCPU: [pid_t: (userTime: UInt64, systemTime: UInt64, lastSample: Date)] = [:]
+    
     // MARK: - Initialization
     private init() {
         // Initialize with empty history
@@ -474,44 +477,56 @@ class StatsManager: ObservableObject {
     
     private func getRunningProcesses() -> [ProcessStats] {
         var processes: [ProcessStats] = []
-        
-        // Get all running applications from NSWorkspace
         let runningApps = NSWorkspace.shared.runningApplications
-        
+        let cpuCount = ProcessInfo.processInfo.processorCount
+        let now = Date()
+
         for app in runningApps {
-            // Skip system processes and processes without bundle identifier
             guard let bundleId = app.bundleIdentifier,
-                  !bundleId.hasPrefix("com.apple.") || bundleId == "com.apple.finder" else {
-                continue
-            }
-            
+                  !bundleId.hasPrefix("com.apple.") || bundleId == "com.apple.finder"
+            else { continue }
+
             let pid = app.processIdentifier
             var cpuUsage: Double = 0.0
             var memoryUsage: UInt64 = 0
-            
-            // Get CPU and memory usage using proc_pidinfo
+
             var taskInfo = proc_taskinfo()
-            let result = proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &taskInfo, Int32(MemoryLayout<proc_taskinfo>.size))
-            
+            let result = proc_pidinfo(pid, PROC_PIDTASKINFO, 0,
+                                      &taskInfo, Int32(MemoryLayout<proc_taskinfo>.size))
+
             if result == MemoryLayout<proc_taskinfo>.size {
-                // Calculate CPU usage (basic approximation)
-                cpuUsage = Double(taskInfo.pti_total_user + taskInfo.pti_total_system) / 1000000.0
-                
-                // Get memory usage
+                let userTime = taskInfo.pti_total_user
+                let systemTime = taskInfo.pti_total_system
                 memoryUsage = taskInfo.pti_resident_size
+
+                // Retrieve previous sample for this PID
+                if let prev = previousProcessCPU[pid] {
+                    let deltaUser = Double(userTime - prev.userTime)
+                    let deltaSystem = Double(systemTime - prev.systemTime)
+                    let deltaTime = now.timeIntervalSince(prev.lastSample)
+
+                    if deltaTime > 0 {
+                        // Convert nanoseconds to seconds and normalize
+                        let totalDelta = (deltaUser + deltaSystem) / 1e9
+                        cpuUsage = (totalDelta / deltaTime) * 100.0 / Double(cpuCount)
+                    }
+                }
+
+                // Update stored snapshot
+                previousProcessCPU[pid] = (userTime, systemTime, now)
             }
-            
+
             let processStats = ProcessStats(
                 pid: pid,
                 name: app.localizedName ?? bundleId,
-                cpuUsage: cpuUsage,
+                cpuUsage: max(0.0, min(cpuUsage, 100.0)), // Clamp for sanity
                 memoryUsage: memoryUsage,
                 icon: app.icon
             )
-            
+
             processes.append(processStats)
         }
-        
+
         return processes
     }
 }
