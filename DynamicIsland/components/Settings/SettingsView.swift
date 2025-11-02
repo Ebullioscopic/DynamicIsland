@@ -1716,6 +1716,7 @@ struct TimerSettings: View {
     @Default(.timerShowsLabel) private var showsLabel
     @Default(.timerShowsProgress) private var showsProgress
     @Default(.timerProgressStyle) private var progressStyle
+    @Default(.timerControlWindowEnabled) private var controlWindowEnabled
     @AppStorage("customTimerDuration") private var customTimerDuration: Double = 600
     @State private var customHours: Int = 0
     @State private var customMinutes: Int = 10
@@ -1738,134 +1739,150 @@ struct TimerSettings: View {
             }
             
             if enableTimerFeature {
-                Section {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Default Custom Timer")
-                            .font(.headline)
-                        
-                        TimerDurationStepperRow(title: "Hours", value: $customHours, range: 0...23)
-                        TimerDurationStepperRow(title: "Minutes", value: $customMinutes, range: 0...59)
-                        TimerDurationStepperRow(title: "Seconds", value: $customSeconds, range: 0...59)
-                        
-                        HStack {
-                            Text("Current default:")
+                Group {
+                    Section {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Default Custom Timer")
+                                .font(.headline)
+
+                            TimerDurationStepperRow(title: "Hours", value: $customHours, range: 0...23)
+                            TimerDurationStepperRow(title: "Minutes", value: $customMinutes, range: 0...59)
+                            TimerDurationStepperRow(title: "Seconds", value: $customSeconds, range: 0...59)
+
+                            HStack {
+                                Text("Current default:")
+                                    .foregroundStyle(.secondary)
+                                Text(customDurationDisplay)
+                                    .font(.system(.body, design: .monospaced))
+                                    .fontWeight(.medium)
+                                Spacer()
+                            }
+                        }
+                        .padding(.vertical, 4)
+                        .onChange(of: customHours) { _, _ in updateCustomDuration() }
+                        .onChange(of: customMinutes) { _, _ in updateCustomDuration() }
+                        .onChange(of: customSeconds) { _, _ in updateCustomDuration() }
+                    } header: {
+                        Text("Custom Timer")
+                    } footer: {
+                        Text("This duration powers the \"Custom\" option inside the timer popover for quick access.")
+                    }
+
+                    Section {
+                        Picker("Timer tint", selection: $colorMode) {
+                            ForEach(TimerIconColorMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        if colorMode == .solid {
+                            ColorPicker("Solid colour", selection: $solidColor, supportsOpacity: false)
+                        }
+
+                        Toggle("Show timer name", isOn: $showsLabel)
+                        Toggle("Show countdown", isOn: $showsCountdown)
+                        Toggle("Show progress", isOn: $showsProgress)
+
+                        Toggle("Show floating pause/stop controls", isOn: $controlWindowEnabled)
+                            .disabled(showsLabel)
+                            .help("These controls sit beside the notch while a timer runs. They require the timer name to stay hidden for spacing.")
+
+                        Picker("Progress style", selection: $progressStyle) {
+                            ForEach(TimerProgressStyle.allCases) { style in
+                                Text(style.rawValue).tag(style)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .disabled(!showsProgress)
+                    } header: {
+                        Text("Appearance")
+                    } footer: {
+                        Text("Configure how the timer looks inside the closed notch. Progress can render as a ring around the icon or as horizontal bars.")
+                    }
+
+                    Section {
+                        if timerPresets.isEmpty {
+                            Text("No presets configured. Add a preset to make it appear in the timer popover.")
+                                .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
-                            Text(customDurationDisplay)
-                                .font(.system(.body, design: .monospaced))
-                                .fontWeight(.medium)
-                            Spacer()
-                        }
-                    }
-                    .padding(.vertical, 4)
-                    .onChange(of: customHours) { _, _ in updateCustomDuration() }
-                    .onChange(of: customMinutes) { _, _ in updateCustomDuration() }
-                    .onChange(of: customSeconds) { _, _ in updateCustomDuration() }
-                } header: {
-                    Text("Custom Timer")
-                } footer: {
-                    Text("This duration powers the \"Custom\" option inside the timer popover for quick access.")
-                }
-                
-                Section {
-                    Picker("Timer tint", selection: $colorMode) {
-                        ForEach(TimerIconColorMode.allCases) { mode in
-                            Text(mode.displayName).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    if colorMode == .solid {
-                        ColorPicker("Solid colour", selection: $solidColor, supportsOpacity: false)
-                    }
-
-                    Toggle("Show timer name", isOn: $showsLabel)
-                    Toggle("Show countdown", isOn: $showsCountdown)
-                    Toggle("Show progress", isOn: $showsProgress)
-
-                    Picker("Progress style", selection: $progressStyle) {
-                        ForEach(TimerProgressStyle.allCases) { style in
-                            Text(style.rawValue).tag(style)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(!showsProgress)
-                } header: {
-                    Text("Appearance")
-                } footer: {
-                    Text("Configure how the timer looks inside the closed notch. Progress can render as a ring around the icon or as horizontal bars.")
-                }
-                
-                Section {
-                    if timerPresets.isEmpty {
-                        Text("No presets configured. Add a preset to make it appear in the timer popover.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 4)
-                    } else {
-                        ForEach(timerPresets.indices, id: \.self) { index in
-                            TimerPresetEditorRow(
-                                preset: $timerPresets[index],
-                                isFirst: index == timerPresets.startIndex,
-                                isLast: index == timerPresets.index(before: timerPresets.endIndex),
-                                moveUp: { movePresetUp(index) },
-                                moveDown: { movePresetDown(index) },
-                                remove: { removePreset(index) }
-                            )
-                        }
-                    }
-                    
-                    HStack {
-                        Button(action: addPreset) {
-                            Label("Add Preset", systemImage: "plus")
-                        }
-                        .buttonStyle(.bordered)
-                        
-                        Spacer()
-                        
-                        Button(role: .destructive, action: { showingResetConfirmation = true }) {
-                            Label("Restore Defaults", systemImage: "arrow.counterclockwise")
-                        }
-                        .buttonStyle(.bordered)
-                        .confirmationDialog("Restore default timer presets?", isPresented: $showingResetConfirmation, titleVisibility: .visible) {
-                            Button("Restore", role: .destructive, action: resetPresets)
-                        }
-                    }
-                } header: {
-                    Text("Timer Presets")
-                } footer: {
-                    Text("Presets show up inside the timer popover with the configured name, duration, and accent colour. Reorder them to change the display order.")
-                }
-                
-                Section {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("Timer Sound")
-                                .font(.system(size: 16, weight: .medium))
-                            Spacer()
-                            Button("Choose File", action: selectCustomTimerSound)
-                                .buttonStyle(.bordered)
-                        }
-                        
-                        if let customTimerSoundPath = UserDefaults.standard.string(forKey: "customTimerSoundPath") {
-                            Text("Custom: \(URL(fileURLWithPath: customTimerSoundPath).lastPathComponent)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                                .padding(.vertical, 4)
                         } else {
-                            Text("Default: dynamic.m4a")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                            ForEach(timerPresets.indices, id: \.self) { index in
+                                TimerPresetEditorRow(
+                                    preset: $timerPresets[index],
+                                    isFirst: index == timerPresets.startIndex,
+                                    isLast: index == timerPresets.index(before: timerPresets.endIndex),
+                                    moveUp: { movePresetUp(index) },
+                                    moveDown: { movePresetDown(index) },
+                                    remove: { removePreset(index) }
+                                )
+                            }
                         }
-                        
-                        Button("Reset to Default") {
-                            UserDefaults.standard.removeObject(forKey: "customTimerSoundPath")
+
+                        HStack {
+                            Button(action: addPreset) {
+                                Label("Add Preset", systemImage: "plus")
+                            }
+                            .buttonStyle(.bordered)
+
+                            Spacer()
+
+                            Button(role: .destructive, action: { showingResetConfirmation = true }) {
+                                Label("Restore Defaults", systemImage: "arrow.counterclockwise")
+                            }
+                            .buttonStyle(.bordered)
+                            .confirmationDialog("Restore default timer presets?", isPresented: $showingResetConfirmation, titleVisibility: .visible) {
+                                Button("Restore", role: .destructive, action: resetPresets)
+                            }
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(UserDefaults.standard.string(forKey: "customTimerSoundPath") == nil)
+                    } header: {
+                        Text("Timer Presets")
+                    } footer: {
+                        Text("Presets show up inside the timer popover with the configured name, duration, and accent colour. Reorder them to change the display order.")
                     }
-                } header: {
-                    Text("Timer Sound")
-                } footer: {
-                    Text("Select a custom sound to play when a timer ends. Supported formats include MP3, M4A, WAV, and AIFF.")
+
+                    Section {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("Timer Sound")
+                                    .font(.system(size: 16, weight: .medium))
+                                Spacer()
+                                Button("Choose File", action: selectCustomTimerSound)
+                                    .buttonStyle(.bordered)
+                            }
+
+                            if let customTimerSoundPath = UserDefaults.standard.string(forKey: "customTimerSoundPath") {
+                                Text("Custom: \(URL(fileURLWithPath: customTimerSoundPath).lastPathComponent)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            } else {
+                                Text("Default: dynamic.m4a")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Button("Reset to Default") {
+                                UserDefaults.standard.removeObject(forKey: "customTimerSoundPath")
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(UserDefaults.standard.string(forKey: "customTimerSoundPath") == nil)
+                        }
+                    } header: {
+                        Text("Timer Sound")
+                    } footer: {
+                        Text("Select a custom sound to play when a timer ends. Supported formats include MP3, M4A, WAV, and AIFF.")
+                    }
+                }
+                .onAppear {
+                    if showsLabel {
+                        controlWindowEnabled = false
+                    }
+                }
+                .onChange(of: showsLabel) { _, show in
+                    if show {
+                        controlWindowEnabled = false
+                    }
                 }
             }
         }

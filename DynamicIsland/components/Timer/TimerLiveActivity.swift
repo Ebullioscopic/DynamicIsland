@@ -20,6 +20,9 @@ struct TimerLiveActivity: View {
     @EnvironmentObject var vm: DynamicIslandViewModel
     @ObservedObject var timerManager = TimerManager.shared
     @State private var isHovering: Bool = false
+    @State private var showTransientLabel: Bool = false
+    @State private var labelHideTask: DispatchWorkItem?
+    @State private var isControlWindowVisible: Bool = false
     @Default(.timerShowsCountdown) private var showsCountdown
     @Default(.timerShowsProgress) private var showsProgress
     @Default(.timerShowsLabel) private var showsLabel
@@ -27,12 +30,15 @@ struct TimerLiveActivity: View {
     @Default(.timerIconColorMode) private var colorMode
     @Default(.timerSolidColor) private var solidColor
     @Default(.timerPresets) private var timerPresets
+    @Default(.timerControlWindowEnabled) private var controlWindowEnabled
     
     private var notchContentHeight: CGFloat {
         max(0, vm.effectiveClosedNotchHeight - (isHovering ? 0 : 12))
     }
 
-    private var wingPadding: CGFloat { 18 }
+    private var wingPadding: CGFloat { 22 }
+    private var ringStrokeWidth: CGFloat { 3 }
+    private var transientLabelDuration: TimeInterval { 4 }
 
     private var ringWrapsIcon: Bool {
         showsRingProgress && showsCountdown
@@ -43,13 +49,13 @@ struct TimerLiveActivity: View {
     }
 
     private var iconWidth: CGFloat {
-        ringWrapsIcon ? max(notchContentHeight, 32) : max(0, notchContentHeight)
+        ringWrapsIcon ? max(notchContentHeight - 6, 28) : max(0, notchContentHeight)
     }
 
     private var infoContentWidth: CGFloat {
         guard showsInfoSection else { return 0 }
-        let textWidth = min(max(titleTextWidth, 44), 220)
-        if showsLabel {
+        if shouldDisplayLabel {
+            let textWidth = min(max(titleTextWidth, 44), 220)
             return textWidth
         } else {
             return min(max(notchContentHeight * 1.4, 64), 220)
@@ -70,7 +76,7 @@ struct TimerLiveActivity: View {
     }
 
     private var ringWidth: CGFloat {
-        ringOnRight ? 32 : 0
+        ringOnRight ? 30 : 0
     }
 
     private var rightWingWidth: CGFloat {
@@ -97,7 +103,7 @@ struct TimerLiveActivity: View {
 
     private var countdownWidth: CGFloat {
         guard showsCountdown else { return 0 }
-        return max(countdownTextWidth + 20, 80)
+        return max(countdownTextWidth + 16, 72)
     }
 
     private var clampedProgress: Double {
@@ -121,13 +127,21 @@ struct TimerLiveActivity: View {
         showsProgress && progressStyle == .bar
     }
 
+    private var shouldDisplayLabel: Bool {
+        showsLabel || showTransientLabel
+    }
+
     private var showsInfoSection: Bool {
-        showsLabel || (showsBarProgress && !showsCountdown)
+        shouldDisplayLabel || (showsBarProgress && !showsCountdown)
     }
 
     private var activePresetColor: Color? {
         guard let presetId = timerManager.activePresetId else { return nil }
         return timerPresets.first { $0.id == presetId }?.color
+    }
+
+    private var shouldShowControlWindow: Bool {
+        controlWindowEnabled && !shouldDisplayLabel && timerManager.isTimerActive
     }
     
     private func measureTextWidth(_ text: String, font: PlatformFont) -> CGFloat {
@@ -192,22 +206,102 @@ struct TimerLiveActivity: View {
             withAnimation(.smooth(duration: 0.18)) {
                 isHovering = hovering
             }
+            syncControlWindow(forceRefresh: true)
+        }
+        .onAppear {
+            syncControlWindow(forceRefresh: true)
+            if timerManager.isTimerActive && !timerManager.isFinished && !timerManager.isOvertime {
+                triggerTransientLabel()
+            }
+        }
+        .onDisappear {
+            hideControlWindow()
+        }
+        .onChange(of: timerManager.isTimerActive) { _, isActive in
+            if isActive {
+                if !timerManager.isFinished && !timerManager.isOvertime {
+                    syncControlWindow(forceRefresh: true)
+                    triggerTransientLabel()
+                }
+            } else {
+                hideControlWindow()
+                cancelTransientLabel()
+                showTransientLabel = false
+                isHovering = false
+            }
+        }
+        .onChange(of: timerManager.timerName) { _, _ in
+            if timerManager.isTimerActive && !timerManager.isFinished && !timerManager.isOvertime {
+                syncControlWindow(forceRefresh: true)
+                triggerTransientLabel()
+            }
+        }
+        .onChange(of: timerManager.isFinished) { _, finished in
+            if finished {
+                cancelTransientLabel()
+                withAnimation(.smooth) {
+                    showTransientLabel = true
+                    isHovering = false
+                }
+                syncControlWindow()
+            }
+        }
+        .onChange(of: timerManager.isOvertime) { _, overtime in
+            if overtime {
+                cancelTransientLabel()
+                withAnimation(.smooth) {
+                    showTransientLabel = true
+                    isHovering = false
+                }
+                syncControlWindow()
+            }
+        }
+        .onChange(of: timerManager.isPaused) { _, _ in
+            syncControlWindow(forceRefresh: true)
+        }
+        .onChange(of: vm.closedNotchSize) { _, _ in
+            syncControlWindow(forceRefresh: true)
+        }
+        .onChange(of: vm.screen) { _, _ in
+            syncControlWindow(forceRefresh: true)
+        }
+        .onChange(of: vm.hideOnClosed) { _, _ in
+            syncControlWindow(forceRefresh: true)
+        }
+        .onChange(of: controlWindowEnabled) { _, _ in
+            syncControlWindow(forceRefresh: true)
+        }
+        .onChange(of: showsLabel) { _, _ in
+            syncControlWindow(forceRefresh: true)
+        }
+        .onChange(of: showTransientLabel) { _, _ in
+            syncControlWindow(forceRefresh: true)
+        }
+        .onChange(of: showsCountdown) { _, _ in
+            syncControlWindow(forceRefresh: true)
+        }
+        .onChange(of: showsProgress) { _, _ in
+            syncControlWindow(forceRefresh: true)
+        }
+        .onChange(of: progressStyle) { _, _ in
+            syncControlWindow(forceRefresh: true)
         }
     }
     
     private var iconSection: some View {
-        let ringDiameter = ringWrapsIcon ? max(iconWidth, 32) : iconWidth
-        let iconSize = ringWrapsIcon ? max(ringDiameter - 10, 18) : max(20, iconWidth - 4)
+        let baseDiameter = ringWrapsIcon ? iconWidth : iconWidth
+        let ringDiameter = ringWrapsIcon ? max(min(baseDiameter, notchContentHeight - 2), 22) : iconWidth
+        let iconSize = ringWrapsIcon ? max(ringDiameter - 12, 16) : max(18, iconWidth - 6)
 
         return ZStack {
             if ringWrapsIcon {
                 Circle()
-                    .stroke(Color.white.opacity(0.15), lineWidth: 3)
+                    .stroke(Color.white.opacity(0.15), lineWidth: ringStrokeWidth)
                     .frame(width: ringDiameter, height: ringDiameter)
 
                 Circle()
                     .trim(from: 0, to: clampedProgress)
-                    .stroke(glyphColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .stroke(glyphColor, style: StrokeStyle(lineWidth: ringStrokeWidth, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(.smooth(duration: 0.25), value: clampedProgress)
                     .frame(width: ringDiameter, height: ringDiameter)
@@ -224,19 +318,20 @@ struct TimerLiveActivity: View {
     }
     
     private var infoSection: some View {
-        let availableWidth = max(0, infoWidth - 18)
-        let resolvedTextWidth = min(max(titleTextWidth, 44), availableWidth)
-        let shouldMarquee = showsLabel && (timerManager.isFinished || timerManager.isOvertime || titleTextWidth > availableWidth)
+    let availableWidth = max(0, infoWidth - 10)
+    let safeWidth = max(44, availableWidth - 6)
+    let resolvedTextWidth = min(max(titleTextWidth, 44), safeWidth)
+        let marqueeLabel = shouldDisplayLabel && (timerManager.isFinished || timerManager.isOvertime || titleTextWidth > availableWidth)
         let showsBarHere = showsBarProgress && !showsCountdown
-        let barWidth = showsLabel ? resolvedTextWidth : availableWidth
+        let barWidth = shouldDisplayLabel ? resolvedTextWidth : availableWidth
 
         return Rectangle()
             .fill(.black)
             .frame(width: infoWidth, height: notchContentHeight)
             .overlay(alignment: .leading) {
                 VStack(alignment: .leading, spacing: showsBarHere ? 4 : 0) {
-                    if showsLabel {
-                        if shouldMarquee {
+                    if shouldDisplayLabel {
+                        if marqueeLabel {
                             MarqueeText(
                                 .constant(timerManager.timerName),
                                 font: .system(size: 12, weight: .medium),
@@ -274,16 +369,17 @@ struct TimerLiveActivity: View {
     }
     
     private var ringSection: some View {
-        ZStack {
+        let diameter = max(min(notchContentHeight - 4, 26), 20)
+        return ZStack {
             Circle()
-                .stroke(Color.white.opacity(0.15), lineWidth: 3)
+                .stroke(Color.white.opacity(0.15), lineWidth: ringStrokeWidth)
             Circle()
                 .trim(from: 0, to: clampedProgress)
-                .stroke(glyphColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .stroke(glyphColor, style: StrokeStyle(lineWidth: ringStrokeWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(.smooth(duration: 0.25), value: clampedProgress)
         }
-        .frame(width: 26, height: 26)
+        .frame(width: diameter, height: diameter)
         .frame(width: ringWidth, height: notchContentHeight, alignment: .center)
     }
     
@@ -310,9 +406,72 @@ struct TimerLiveActivity: View {
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
-        .padding(.trailing, 8)
+     .padding(.trailing, 8)
      .frame(width: countdownWidth,
          height: notchContentHeight, alignment: .center)
+    }
+
+    private func triggerTransientLabel() {
+        guard !showsLabel else { return }
+        cancelTransientLabel()
+        withAnimation(.smooth) {
+            showTransientLabel = true
+        }
+        let task = DispatchWorkItem {
+            withAnimation(.smooth) {
+                showTransientLabel = false
+            }
+            syncControlWindow(forceRefresh: true)
+        }
+        labelHideTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + transientLabelDuration, execute: task)
+    }
+
+    private func cancelTransientLabel() {
+        labelHideTask?.cancel()
+        labelHideTask = nil
+    }
+
+    private func syncControlWindow(forceRefresh: Bool = false) {
+#if os(macOS)
+        let notchAvailable = vm.effectiveClosedNotchHeight > 0 && vm.closedNotchSize.width > 0
+        let targetVisible = shouldShowControlWindow && notchAvailable
+        if targetVisible {
+            let metrics = currentControlWindowMetrics()
+            if !isControlWindowVisible {
+                let didPresent = TimerControlWindowManager.shared.present(using: vm, metrics: metrics)
+                isControlWindowVisible = didPresent
+            } else if forceRefresh {
+                let didRefresh = TimerControlWindowManager.shared.refresh(using: vm, metrics: metrics)
+                isControlWindowVisible = didRefresh
+                if !didRefresh {
+                    TimerControlWindowManager.shared.hide()
+                }
+            }
+        } else if isControlWindowVisible {
+            TimerControlWindowManager.shared.hide()
+            isControlWindowVisible = false
+        }
+#endif
+    }
+
+    private func hideControlWindow() {
+#if os(macOS)
+        if isControlWindowVisible {
+            TimerControlWindowManager.shared.hide()
+            isControlWindowVisible = false
+        }
+#endif
+    }
+
+    private func currentControlWindowMetrics() -> TimerControlWindowMetrics {
+        TimerControlWindowMetrics(
+            notchHeight: max(vm.closedNotchSize.height, vm.effectiveClosedNotchHeight),
+            notchWidth: vm.closedNotchSize.width + (isHovering ? 8 : 0),
+            rightWingWidth: rightWingWidth,
+            cornerRadius: cornerRadiusInsets.closed.bottom,
+            spacing: 6
+        )
     }
 }
 

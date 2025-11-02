@@ -16655,6 +16655,9 @@
         }
       }
     },
+    "Show floating pause/stop controls" : {
+
+    },
     "Show on a specific display" : {
       "localizations" : {
         "ar" : {
@@ -18149,6 +18152,9 @@
       }
     },
     "TheDynamicIsland" : {
+
+    },
+    "These controls sit beside the notch while a timer runs. They require the timer name to stay hidden for spacing." : {
 
     },
     "These indicators appear in the notch when apps are using your camera or microphone, matching macOS's native privacy indicators." : {
