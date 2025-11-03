@@ -59,8 +59,11 @@ final class LockScreenWeatherManager: ObservableObject {
 
     @discardableResult
     func refresh(force: Bool = false) async -> LockScreenWeatherSnapshot? {
+        NSLog("LockScreenWeatherManager: refresh requested (force=%@)", force ? "true" : "false")
         let interval = Defaults[.lockScreenWeatherRefreshInterval]
         if !force, let lastFetchDate, Date().timeIntervalSince(lastFetchDate) < interval {
+            let remaining = interval - Date().timeIntervalSince(lastFetchDate)
+            NSLog("LockScreenWeatherManager: skipping refresh (%.0f s remaining until next fetch)", max(remaining, 0))
             if let payload = latestWeatherPayload {
                 if Defaults[.lockScreenWeatherShowsBluetooth] {
                     BluetoothAudioManager.shared.refreshConnectedDeviceBatteries()
@@ -78,6 +81,12 @@ final class LockScreenWeatherManager: ObservableObject {
 
         do {
             let location = await locationProvider.currentLocation()
+            let provider = Defaults[.lockScreenWeatherProviderSource]
+            NSLog(
+                "LockScreenWeatherManager: fetching weather from %@ (location %@)",
+                provider.displayName,
+                location != nil ? "available" : "missing"
+            )
             let payload = try await fetchWeatherPayload(location: location)
             latestWeatherPayload = payload
             if Defaults[.lockScreenWeatherShowsBluetooth] {
@@ -87,18 +96,24 @@ final class LockScreenWeatherManager: ObservableObject {
             self.snapshot = snapshot
             lastFetchDate = Date()
             deliver(snapshot, forceShow: false)
+            NSLog("LockScreenWeatherManager: weather refresh succeeded")
             return snapshot
         } catch {
             NSLog("LockScreenWeatherManager: failed to fetch weather - \(error.localizedDescription)")
 
             let providerSource = Defaults[.lockScreenWeatherProviderSource]
+            let showsCharging = Defaults[.lockScreenWeatherShowsCharging]
+            let chargingInfo = showsCharging ? makeChargingInfo() : nil
+            let showsBatteryGauge = Defaults[.lockScreenWeatherShowsBatteryGauge]
+            let batteryInfo = showsBatteryGauge ? makeBatteryGaugeInfo(isCharging: chargingInfo != nil) : nil
             let fallback = LockScreenWeatherSnapshot(
                 temperatureText: snapshot?.temperatureText ?? "--",
                 symbolName: snapshot?.symbolName ?? "cloud.fill",
                 description: snapshot?.description ?? "",
                 locationName: snapshot?.locationName,
-                charging: Defaults[.lockScreenWeatherShowsCharging] ? makeChargingInfo() : nil,
+                charging: chargingInfo,
                 bluetooth: Defaults[.lockScreenWeatherShowsBluetooth] ? makeBluetoothInfo() : nil,
+                battery: batteryInfo,
                 showsLocation: snapshot?.showsLocation ?? false,
                 airQuality: (providerSource.supportsAirQuality && Defaults[.lockScreenWeatherShowsAQI]) ? snapshot?.airQuality : nil,
                 widgetStyle: Defaults[.lockScreenWeatherWidgetStyle],
@@ -172,7 +187,11 @@ final class LockScreenWeatherManager: ObservableObject {
                 .map { _ in () }.eraseToAnyPublisher(),
             Defaults.publisher(.lockScreenWeatherShowsBluetooth, options: [])
                 .map { _ in () }.eraseToAnyPublisher(),
+            Defaults.publisher(.lockScreenWeatherShowsBatteryGauge, options: [])
+                .map { _ in () }.eraseToAnyPublisher(),
             Defaults.publisher(.lockScreenWeatherWidgetStyle, options: [])
+                .map { _ in () }.eraseToAnyPublisher(),
+            Defaults.publisher(.lockScreenWeatherTemperatureUnit, options: [])
                 .map { _ in () }.eraseToAnyPublisher(),
             Defaults.publisher(.lockScreenWeatherShowsAQI, options: [])
                 .map { _ in () }.eraseToAnyPublisher(),
@@ -193,7 +212,34 @@ final class LockScreenWeatherManager: ObservableObject {
                 guard let self else { return }
                 self.latestWeatherPayload = nil
                 Task { @MainActor in
+                    NSLog("LockScreenWeatherManager: provider changed, forcing refresh")
                     _ = await self.refresh(force: true)
+                }
+            }
+            .store(in: &cancellables)
+
+        Defaults.publisher(.lockScreenWeatherTemperatureUnit, options: [])
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.latestWeatherPayload = nil
+                Task { @MainActor in
+                    NSLog("LockScreenWeatherManager: temperature unit changed, forcing refresh")
+                    _ = await self.refresh(force: true)
+                }
+            }
+            .store(in: &cancellables)
+
+        Defaults.publisher(.enableLockScreenWeatherWidget, options: [])
+            .sink { [weak self] change in
+                guard let self else { return }
+                Task { @MainActor in
+                    if change.newValue {
+                        NSLog("LockScreenWeatherManager: widget enabled, triggering refresh")
+                        self.locationProvider.prepareAuthorization()
+                        _ = await self.refresh(force: true)
+                    } else {
+                        LockScreenWeatherPanelManager.shared.hide()
+                    }
                 }
             }
             .store(in: &cancellables)
@@ -222,14 +268,15 @@ final class LockScreenWeatherManager: ObservableObject {
     }
 
     private func makeSnapshot(from payload: LockScreenWeatherSnapshot) -> LockScreenWeatherSnapshot {
-    let locationName = payload.locationName
+        let locationName = payload.locationName
         let chargingInfo = Defaults[.lockScreenWeatherShowsCharging] ? makeChargingInfo() : nil
         let bluetoothInfo = Defaults[.lockScreenWeatherShowsBluetooth] ? makeBluetoothInfo() : nil
         let widgetStyle = Defaults[.lockScreenWeatherWidgetStyle]
-    let shouldShowLocation = widgetStyle == .inline && Defaults[.lockScreenWeatherShowsLocation] && !(locationName?.isEmpty ?? true)
+        let shouldShowLocation = widgetStyle == .inline && Defaults[.lockScreenWeatherShowsLocation] && !(locationName?.isEmpty ?? true)
         let showsChargingPercentage = Defaults[.lockScreenWeatherShowsChargingPercentage]
         let providerSource = Defaults[.lockScreenWeatherProviderSource]
         let airQualityInfo = (Defaults[.lockScreenWeatherShowsAQI] && providerSource.supportsAirQuality) ? payload.airQuality : nil
+        let batteryInfo = Defaults[.lockScreenWeatherShowsBatteryGauge] ? makeBatteryGaugeInfo(isCharging: chargingInfo != nil) : nil
         let usesGaugeTint = Defaults[.lockScreenWeatherUsesGaugeTint]
 
         return LockScreenWeatherSnapshot(
@@ -239,6 +286,7 @@ final class LockScreenWeatherManager: ObservableObject {
             locationName: locationName,
             charging: chargingInfo,
             bluetooth: bluetoothInfo,
+            battery: batteryInfo,
             showsLocation: shouldShowLocation,
             airQuality: airQualityInfo,
             widgetStyle: widgetStyle,
@@ -271,6 +319,18 @@ final class LockScreenWeatherManager: ObservableObject {
             isPluggedIn: isPluggedIn,
             batteryLevel: isPluggedIn || isCharging ? clampedLevel : nil
         )
+    }
+
+    private func makeBatteryGaugeInfo(isCharging: Bool) -> LockScreenWeatherSnapshot.BatteryInfo? {
+        guard !isCharging else { return nil }
+
+        let battery = BatteryStatusViewModel.shared
+        let rawLevel = Int(round(Double(battery.levelBattery)))
+        let clampedLevel = min(max(rawLevel, 0), 100)
+
+        guard clampedLevel >= 0 else { return nil }
+
+        return LockScreenWeatherSnapshot.BatteryInfo(batteryLevel: clampedLevel)
     }
 
     private func makeBluetoothInfo() -> LockScreenWeatherSnapshot.BluetoothInfo? {
@@ -352,6 +412,10 @@ struct LockScreenWeatherSnapshot: Equatable {
         let iconName: String
     }
 
+    struct BatteryInfo: Equatable {
+        let batteryLevel: Int
+    }
+
     struct AirQualityInfo: Equatable {
         enum Category: String, Equatable {
             case good
@@ -385,6 +449,7 @@ struct LockScreenWeatherSnapshot: Equatable {
     let locationName: String?
     let charging: ChargingInfo?
     let bluetooth: BluetoothInfo?
+    let battery: BatteryInfo?
     let showsLocation: Bool
     let airQuality: AirQualityInfo?
     let widgetStyle: LockScreenWeatherWidgetStyle
@@ -472,11 +537,12 @@ private actor LockScreenWeatherProvider {
             throw WeatherProviderError.noData
         }
 
-        let usesMetric = Locale.current.usesMetricSystem
+        let unit = Defaults[.lockScreenWeatherTemperatureUnit]
+        let usesMetric = unit.usesMetricSystem
         let rawTemperature = usesMetric ? condition.tempC : condition.tempF
         let temperatureValue = Double(rawTemperature) ?? 0
         let temperatureText = "\(Int(round(temperatureValue)))°"
-        let unitSymbol = usesMetric ? "°C" : "°F"
+        let unitSymbol = unit.symbol
 
         let forecast = payload.dailyWeather.first
         let minTempValue = forecast.flatMap { daily in
@@ -519,6 +585,7 @@ private actor LockScreenWeatherProvider {
             locationName: locationName,
             charging: nil,
             bluetooth: nil,
+            battery: nil,
             showsLocation: true,
             airQuality: airQualityInfo,
             widgetStyle: .inline,
@@ -532,7 +599,8 @@ private actor LockScreenWeatherProvider {
         let latitude = String(format: "%.4f", location.coordinate.latitude)
         let longitude = String(format: "%.4f", location.coordinate.longitude)
 
-        let usesMetric = Locale.current.usesMetricSystem
+        let unit = Defaults[.lockScreenWeatherTemperatureUnit]
+        let usesMetric = unit.usesMetricSystem
         var weatherComponents = URLComponents(string: "https://api.open-meteo.com/v1/forecast")
         var weatherQueryItems: [URLQueryItem] = [
             URLQueryItem(name: "latitude", value: latitude),
@@ -543,8 +611,8 @@ private actor LockScreenWeatherProvider {
             URLQueryItem(name: "timezone", value: "auto")
         ]
 
-        if !usesMetric {
-            weatherQueryItems.append(URLQueryItem(name: "temperature_unit", value: "fahrenheit"))
+        if let temperatureUnitParameter = unit.openMeteoTemperatureParameter {
+            weatherQueryItems.append(URLQueryItem(name: "temperature_unit", value: temperatureUnitParameter))
         }
 
         weatherComponents?.queryItems = weatherQueryItems
@@ -569,7 +637,7 @@ private actor LockScreenWeatherProvider {
         let temperatureText = "\(Int(round(temperatureValue)))°"
         let code = current.weatherCode ?? 0
         let mapping = OpenMeteoSymbolMapper.mapping(for: code)
-        let unitSymbol = usesMetric ? "°C" : "°F"
+        let unitSymbol = unit.symbol
         let minTempValue = weatherPayload.daily?.temperature2MMin?.first
         let maxTempValue = weatherPayload.daily?.temperature2MMax?.first
 
@@ -592,6 +660,7 @@ private actor LockScreenWeatherProvider {
             locationName: nil,
             charging: nil,
             bluetooth: nil,
+            battery: nil,
             showsLocation: true,
             airQuality: airQualityInfo,
             widgetStyle: .inline,

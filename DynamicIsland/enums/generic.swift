@@ -102,3 +102,26 @@ enum LockScreenWeatherProviderSource: String, CaseIterable, Defaults.Serializabl
         }
     }
 }
+
+enum LockScreenWeatherTemperatureUnit: String, CaseIterable, Defaults.Serializable, Identifiable {
+    case celsius = "Celsius"
+    case fahrenheit = "Fahrenheit"
+
+    var id: String { rawValue }
+
+    var usesMetricSystem: Bool { self == .celsius }
+
+    var symbol: String {
+        switch self {
+        case .celsius: return "°C"
+        case .fahrenheit: return "°F"
+        }
+    }
+
+    var openMeteoTemperatureParameter: String? {
+        switch self {
+        case .celsius: return nil
+        case .fahrenheit: return "fahrenheit"
+        }
+    }
+}

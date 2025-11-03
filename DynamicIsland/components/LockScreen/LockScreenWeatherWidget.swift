@@ -11,14 +11,9 @@ struct LockScreenWeatherWidget: View {
 	private var isInline: Bool { snapshot.widgetStyle == .inline }
 	private var stackAlignment: VerticalAlignment { isInline ? .firstTextBaseline : .top }
 	private var stackSpacing: CGFloat { isInline ? 14 : 22 }
-	private var gaugeLineWidth: CGFloat { 6 }
 	private var gaugeDiameter: CGFloat { 64 }
 	private var topPadding: CGFloat { isInline ? 6 : 22 }
 	private var bottomPadding: CGFloat { isInline ? 6 : 10 }
-
-	private var gaugeBackgroundColor: Color {
-		snapshot.usesGaugeTint ? Color.white.opacity(0.22) : Color.white.opacity(0.32)
-	}
 
 	private var monochromeGaugeTint: Color {
 		Color.white.opacity(0.9)
@@ -28,6 +23,10 @@ struct LockScreenWeatherWidget: View {
 		HStack(alignment: stackAlignment, spacing: stackSpacing) {
 			if let charging = snapshot.charging {
 				chargingSegment(for: charging)
+			}
+
+			if !isInline, let battery = snapshot.battery {
+				batterySegment(for: battery)
 			}
 
 			if let bluetooth = snapshot.bluetooth {
@@ -98,6 +97,16 @@ struct LockScreenWeatherWidget: View {
 		}
 	}
 
+	@ViewBuilder
+	private func batterySegment(for info: LockScreenWeatherSnapshot.BatteryInfo) -> some View {
+		switch snapshot.widgetStyle {
+		case .inline:
+			EmptyView()
+		case .circular:
+			circularBatterySegment(for: info)
+		}
+	}
+
 	private func inlineChargingSegment(for info: LockScreenWeatherSnapshot.ChargingInfo) -> some View {
 		HStack(alignment: .firstTextBaseline, spacing: 6) {
 			if let iconName = chargingIconName(for: info) {
@@ -115,11 +124,27 @@ struct LockScreenWeatherWidget: View {
 
 	@ViewBuilder
 	private func circularChargingSegment(for info: LockScreenWeatherSnapshot.ChargingInfo) -> some View {
-		if let level = info.batteryLevel {
+		if let rawLevel = info.batteryLevel {
+			let level = clampedBatteryLevel(rawLevel)
+
 			VStack(spacing: 6) {
-				circularBadge(progress: Double(level) / 100, tint: batteryTint(for: level), lineWidth: gaugeLineWidth, diameter: gaugeDiameter) {
+				Gauge(value: Double(level), in: 0...100) {
+					EmptyView()
+				} currentValueLabel: {
 					chargingGlyph(for: info)
+				} minimumValueLabel: {
+					Text("0")
+						.font(.system(size: 11, weight: .medium, design: .rounded))
+						.foregroundStyle(secondaryLabelColor)
+				} maximumValueLabel: {
+					Text("100")
+						.font(.system(size: 11, weight: .medium, design: .rounded))
+						.foregroundStyle(secondaryLabelColor)
 				}
+				.gaugeStyle(.accessoryCircularCapacity)
+				.tint(batteryTint(for: level))
+				.frame(width: gaugeDiameter, height: gaugeDiameter)
+
 				Text(chargingDetailLabel(for: info))
 					.font(inlineSecondaryFont)
 					.foregroundStyle(secondaryLabelColor)
@@ -129,6 +154,32 @@ struct LockScreenWeatherWidget: View {
 		} else {
 			inlineChargingSegment(for: info)
 		}
+	}
+
+	private func circularBatterySegment(for info: LockScreenWeatherSnapshot.BatteryInfo) -> some View {
+		let level = clampedBatteryLevel(info.batteryLevel)
+
+		return VStack(spacing: 6) {
+			Gauge(value: Double(level), in: 0...100) {
+				EmptyView()
+			} currentValueLabel: {
+				Image(systemName: "battery.100")
+					.font(.system(size: 20, weight: .semibold))
+					.foregroundStyle(Color.white)
+			} minimumValueLabel: {
+				EmptyView()
+			} maximumValueLabel: {
+				EmptyView()
+			}
+			.gaugeStyle(.accessoryCircularCapacity)
+			.tint(batteryTint(for: level))
+			.frame(width: gaugeDiameter, height: gaugeDiameter)
+
+			Text("\(level)%")
+				.font(inlineSecondaryFont)
+				.foregroundStyle(secondaryLabelColor)
+		}
+		.layoutPriority(1)
 	}
 
 	@ViewBuilder
@@ -155,13 +206,24 @@ struct LockScreenWeatherWidget: View {
 	}
 
 	private func circularBluetoothSegment(for info: LockScreenWeatherSnapshot.BluetoothInfo) -> some View {
-		VStack(spacing: 6) {
-			let clamped = clampedBatteryLevel(info.batteryLevel)
-			circularBadge(progress: Double(clamped) / 100, tint: bluetoothTint(for: clamped), lineWidth: gaugeLineWidth, diameter: gaugeDiameter) {
+		let clamped = clampedBatteryLevel(info.batteryLevel)
+
+		return VStack(spacing: 6) {
+			Gauge(value: Double(clamped), in: 0...100) {
+				EmptyView()
+			} currentValueLabel: {
 				Image(systemName: info.iconName)
 					.font(.system(size: 22, weight: .semibold))
 					.foregroundStyle(Color.white)
+			} minimumValueLabel: {
+				EmptyView()
+			} maximumValueLabel: {
+				EmptyView()
 			}
+			.gaugeStyle(.accessoryCircularCapacity)
+			.tint(bluetoothTint(for: clamped))
+			.frame(width: gaugeDiameter, height: gaugeDiameter)
+
 			Text(bluetoothPercentageText(for: info.batteryLevel))
 				.font(inlineSecondaryFont)
 				.foregroundStyle(secondaryLabelColor)
@@ -193,11 +255,17 @@ struct LockScreenWeatherWidget: View {
 
 	private func circularAirQualitySegment(for info: LockScreenWeatherSnapshot.AirQualityInfo) -> some View {
 		VStack(spacing: 6) {
-			circularBadge(progress: aqiProgress(for: info.index), tint: aqiTint(for: info.category), lineWidth: gaugeLineWidth, diameter: gaugeDiameter) {
+			Gauge(value: Double(info.index), in: 0...500) {
+				EmptyView()
+			} currentValueLabel: {
 				Text("\(info.index)")
 					.font(.system(size: 20, weight: .semibold, design: .rounded))
 					.foregroundStyle(Color.white)
 			}
+			.gaugeStyle(.accessoryCircular)
+			.tint(aqiTint(for: info.category))
+			.frame(width: gaugeDiameter, height: gaugeDiameter)
+
 			Text("AQI · \(info.category.displayName)")
 				.font(inlineSecondaryFont)
 				.foregroundStyle(secondaryLabelColor)
@@ -207,17 +275,25 @@ struct LockScreenWeatherWidget: View {
 	}
 
 	private func temperatureGauge(for info: LockScreenWeatherSnapshot.TemperatureInfo) -> some View {
-		VStack(spacing: 6) {
-			circularBadge(progress: temperatureProgress(for: info), tint: temperatureTint(for: info), lineWidth: gaugeLineWidth, diameter: gaugeDiameter) {
+		let range = temperatureRange(for: info)
+
+		return VStack(spacing: 6) {
+			Gauge(value: info.current, in: range) {
+				EmptyView()
+			} currentValueLabel: {
 				temperatureCenterLabel(for: info)
 			}
+			.gaugeStyle(.accessoryCircular)
+			.tint(temperatureTint(for: info))
+			.frame(width: gaugeDiameter, height: gaugeDiameter)
+
 			HStack {
 				Text(minimumTemperatureLabel(for: info))
-					.font(inlineSecondaryFont)
+					.font(.system(size: 11, weight: .medium, design: .rounded))
 					.foregroundStyle(secondaryLabelColor)
 				Spacer()
 				Text(maximumTemperatureLabel(for: info))
-					.font(inlineSecondaryFont)
+					.font(.system(size: 11, weight: .medium, design: .rounded))
 					.foregroundStyle(secondaryLabelColor)
 			}
 			.frame(width: gaugeDiameter)
@@ -307,19 +383,25 @@ struct LockScreenWeatherWidget: View {
 	}
 
 	private func temperatureCenterLabel(for info: LockScreenWeatherSnapshot.TemperatureInfo) -> some View {
-		let symbol = info.unitSymbol
-		let unitSuffix = symbol.replacingOccurrences(of: "°", with: "")
 		return HStack(alignment: .top, spacing: 2) {
 			Text("\(info.displayCurrent)°")
 				.font(.system(size: 20, weight: .semibold, design: .rounded))
-			if !unitSuffix.isEmpty {
-				Text(unitSuffix)
-					.font(.system(size: 11, weight: .medium, design: .rounded))
-					.foregroundStyle(secondaryLabelColor)
-					.offset(y: 2)
-			}
 		}
 		.foregroundStyle(Color.white)
+	}
+
+	private func temperatureRange(for info: LockScreenWeatherSnapshot.TemperatureInfo) -> ClosedRange<Double> {
+		let minimumCandidate = info.minimum ?? info.current
+		let maximumCandidate = info.maximum ?? info.current
+		var lowerBound = min(minimumCandidate, info.current)
+		var upperBound = max(maximumCandidate, info.current)
+
+		if lowerBound == upperBound {
+			lowerBound -= 1
+			upperBound += 1
+		}
+
+		return lowerBound...upperBound
 	}
 
 	private func clampedBatteryLevel(_ level: Int) -> Int {
@@ -334,23 +416,6 @@ struct LockScreenWeatherWidget: View {
 				.foregroundStyle(secondaryLabelColor)
 		}
 		return text
-	}
-
-	private func aqiProgress(for index: Int) -> Double {
-		let clamped = min(max(Double(index), 0), 500)
-		return clamped / 500
-	}
-
-	private func temperatureProgress(for info: LockScreenWeatherSnapshot.TemperatureInfo) -> Double {
-		let current = info.current
-		let minValue = info.minimum ?? current
-		let maxValue = info.maximum ?? current
-
-		let lowerBound = min(minValue, current)
-		let upperBound = max(maxValue, current)
-		let span = max(upperBound - lowerBound, 1)
-
-		return min(max((current - lowerBound) / span, 0), 1)
 	}
 
 	private func batteryTint(for level: Int) -> Color {
@@ -416,27 +481,6 @@ struct LockScreenWeatherWidget: View {
 		}
 	}
 
-	@ViewBuilder
-	private func circularBadge<Content: View>(
-		progress: Double?,
-		tint: Color,
-		background: Color? = nil,
-		lineWidth: CGFloat,
-		diameter: CGFloat,
-		@ViewBuilder content: @escaping () -> Content
-	) -> some View {
-		if let progress {
-			CircularMetricView(
-				progress: progress,
-				foreground: tint,
-				background: background ?? gaugeBackgroundColor,
-				lineWidth: lineWidth,
-				diameter: diameter,
-				content: content
-			)
-		}
-	}
-
 	private var accessibilityLabel: String {
 		var components: [String] = []
 
@@ -469,6 +513,10 @@ struct LockScreenWeatherWidget: View {
 
 		if let airQuality = snapshot.airQuality {
 			components.append(accessibilityAirQualityText(for: airQuality))
+		}
+
+		if let battery = snapshot.battery, !isInline {
+			components.append(accessibilityBatteryText(for: battery))
 		}
 
 		return components.joined(separator: ". ")
@@ -515,46 +563,12 @@ struct LockScreenWeatherWidget: View {
 			airQuality.category.displayName
 		)
 	}
-}
 
-private struct CircularMetricView<Content: View>: View {
-	private let progress: Double
-	private let foreground: Color
-	private let background: Color
-	private let lineWidth: CGFloat
-	private let diameter: CGFloat
-	private let contentBuilder: () -> Content
-
-	init(
-		progress: Double,
-		foreground: Color,
-		background: Color,
-		lineWidth: CGFloat = 6,
-		diameter: CGFloat = 64,
-		@ViewBuilder content: @escaping () -> Content
-	) {
-		self.progress = min(max(progress, 0), 1)
-		self.foreground = foreground
-		self.background = background
-		self.lineWidth = lineWidth
-		self.diameter = diameter
-		self.contentBuilder = content
-	}
-
-	var body: some View {
-		ZStack {
-			Circle()
-				.stroke(background, lineWidth: lineWidth)
-			Circle()
-				.trim(from: 0, to: CGFloat(progress))
-				.stroke(
-					foreground,
-					style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
-				)
-				.rotationEffect(.degrees(-90))
-			contentBuilder()
-		}
-		.frame(width: diameter, height: diameter)
+	private func accessibilityBatteryText(for battery: LockScreenWeatherSnapshot.BatteryInfo) -> String {
+		String(
+			format: NSLocalizedString("Mac battery at %d percent", comment: "Mac battery gauge accessibility label"),
+			clampedBatteryLevel(battery.batteryLevel)
+		)
 	}
 }
 

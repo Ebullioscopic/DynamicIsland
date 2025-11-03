@@ -182,7 +182,9 @@ struct GeneralSettings: View {
     @Default(.lockScreenWeatherShowsCharging) var lockScreenWeatherShowsCharging
     @Default(.lockScreenWeatherShowsChargingPercentage) var lockScreenWeatherShowsChargingPercentage
     @Default(.lockScreenWeatherShowsBluetooth) var lockScreenWeatherShowsBluetooth
+    @Default(.lockScreenWeatherShowsBatteryGauge) var lockScreenWeatherShowsBatteryGauge
     @Default(.lockScreenWeatherWidgetStyle) var lockScreenWeatherWidgetStyle
+    @Default(.lockScreenWeatherTemperatureUnit) var lockScreenWeatherTemperatureUnit
     @Default(.lockScreenWeatherShowsAQI) var lockScreenWeatherShowsAQI
     @Default(.lockScreenWeatherUsesGaugeTint) var lockScreenWeatherUsesGaugeTint
     @Default(.lockScreenWeatherProviderSource) var lockScreenWeatherProviderSource
@@ -345,12 +347,19 @@ struct GeneralSettings: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    Picker("Temperature unit", selection: $lockScreenWeatherTemperatureUnit) {
+                        ForEach(LockScreenWeatherTemperatureUnit.allCases) { unit in
+                            Text(unit.rawValue).tag(unit)
+                        }
+                    }
+                    .pickerStyle(.segmented)
                     Defaults.Toggle("Show location label", key: .lockScreenWeatherShowsLocation)
                         .disabled(lockScreenWeatherWidgetStyle == .circular)
                     Defaults.Toggle("Show charging status", key: .lockScreenWeatherShowsCharging)
                     if lockScreenWeatherShowsCharging {
                         Defaults.Toggle("Show charging percentage", key: .lockScreenWeatherShowsChargingPercentage)
                     }
+                    Defaults.Toggle("Show battery indicator", key: .lockScreenWeatherShowsBatteryGauge)
                     Defaults.Toggle("Show Bluetooth battery", key: .lockScreenWeatherShowsBluetooth)
                     Defaults.Toggle("Show AQI widget", key: .lockScreenWeatherShowsAQI)
                         .disabled(!lockScreenWeatherProviderSource.supportsAirQuality)
