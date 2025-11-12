@@ -43,7 +43,7 @@ final class ReminderLiveActivityManager: ObservableObject {
     private var pendingRefreshForce = false
     private var pendingRefreshToken = UUID()
     private var lastRefreshDate: Date?
-    private let minimumRefreshInterval: TimeInterval = 10
+    private let minimumRefreshInterval: TimeInterval = 60
     private let refreshDebounceInterval: TimeInterval = 0.3
     private var refreshTaskToken = UUID()
     private var hasShownCriticalSneakPeek = false
@@ -291,6 +291,10 @@ final class ReminderLiveActivityManager: ObservableObject {
         handleEntrySelection(first, referenceDate: referenceDate)
     }
 
+    func requestRefresh(force: Bool = false) {
+        scheduleRefresh(force: force)
+    }
+
     func refreshUpcomingReminder(force: Bool = false) async {
         guard Defaults[.enableReminderLiveActivity] else {
             deactivateReminder()
@@ -341,7 +345,7 @@ final class ReminderLiveActivityManager: ObservableObject {
             return
         }
 
-            if entry.triggerDate <= date {
+        if entry.triggerDate <= date {
             if entry.triggerDate > entry.event.start {
                 entry = ReminderEntry(event: entry.event, triggerDate: entry.event.start, leadTime: entry.leadTime)
                 nextReminder = entry
@@ -365,14 +369,14 @@ final class ReminderLiveActivityManager: ObservableObject {
                     if !hasShownCriticalSneakPeek {
                         let displayDuration = min(criticalWindow, max(timeRemaining - 2, 0))
                         if displayDuration > 0 {
-                        DynamicIslandViewCoordinator.shared.toggleSneakPeek(
-                            status: true,
-                            type: .reminder,
-                            duration: displayDuration,
-                            value: 0,
-                            icon: ReminderLiveActivityManager.criticalIconName
-                        )
-                        hasShownCriticalSneakPeek = true
+                            DynamicIslandViewCoordinator.shared.toggleSneakPeek(
+                                status: true,
+                                type: .reminder,
+                                duration: displayDuration,
+                                value: 0,
+                                icon: ReminderLiveActivityManager.criticalIconName
+                            )
+                            hasShownCriticalSneakPeek = true
                         }
                     }
                 } else {
