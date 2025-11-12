@@ -185,6 +185,7 @@ struct DynamicIslandBatteryView: View {
                 Text("\(Int32(levelBattery))%")
                     .font(.callout)
                     .foregroundStyle(.white)
+                    .frame(width: 40, alignment: .trailing)
             }
             BatteryView(
                 levelBattery: levelBattery,
