@@ -13,7 +13,7 @@
     <img src="https://img.shields.io/github/downloads/Ebullioscopic/Atoll/total?label=Downloads" alt="GitHub downloads"/>
   </a>
   <a href="https://discord.gg/zvjB4tJBkt">
-    <img src="https://img.shields.io/discord/1120176554840510494?label=Discord&logo=discord&color=7289da" alt="Discord server"/>
+    <img src="https://img.shields.io/discord/1429481472942669896?label=Discord&logo=discord&color=7289da" alt="Discord server"/>
   </a>
 </p>
 
