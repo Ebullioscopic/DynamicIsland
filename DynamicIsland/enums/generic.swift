@@ -126,6 +126,51 @@ enum LockScreenWeatherTemperatureUnit: String, CaseIterable, Defaults.Serializab
     }
 }
 
+enum LockScreenWeatherAirQualityScale: String, CaseIterable, Defaults.Serializable, Identifiable {
+    case us = "U.S. AQI"
+    case european = "EAQI"
+
+    var id: String { rawValue }
+
+    var displayName: String { rawValue }
+
+    var compactLabel: String {
+        switch self {
+        case .us:
+            return "AQI"
+        case .european:
+            return "EAQI"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .us:
+            return "AQI"
+        case .european:
+            return "EAQI"
+        }
+    }
+
+    var queryParameter: String {
+        switch self {
+        case .us:
+            return "us_aqi"
+        case .european:
+            return "european_aqi"
+        }
+    }
+
+    var gaugeRange: ClosedRange<Double> {
+        switch self {
+        case .us:
+            return 0...500
+        case .european:
+            return 0...120
+        }
+    }
+}
+
 enum LockScreenReminderChipStyle: String, CaseIterable, Defaults.Serializable, Identifiable {
     case eventColor = "Event color"
     case monochrome = "White"

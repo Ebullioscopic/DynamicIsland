@@ -246,7 +246,7 @@ struct LockScreenWeatherWidget: View {
 			Image(systemName: "wind")
 				.font(.system(size: 18, weight: .semibold))
 				.symbolRenderingMode(.hierarchical)
-			inlineComposite(primary: "AQI \(info.index)", secondary: info.category.displayName)
+			inlineComposite(primary: "\(info.scale.compactLabel) \(info.index)", secondary: info.category.displayName)
 				.lineLimit(1)
 				.minimumScaleFactor(0.85)
 		}
@@ -254,8 +254,11 @@ struct LockScreenWeatherWidget: View {
 	}
 
 	private func circularAirQualitySegment(for info: LockScreenWeatherSnapshot.AirQualityInfo) -> some View {
-		VStack(spacing: 6) {
-			Gauge(value: Double(info.index), in: 0...500) {
+		let range = info.scale.gaugeRange
+		let clampedValue = min(max(Double(info.index), range.lowerBound), range.upperBound)
+
+		return VStack(spacing: 6) {
+			Gauge(value: clampedValue, in: range) {
 				EmptyView()
 			} currentValueLabel: {
 				Text("\(info.index)")
@@ -263,10 +266,10 @@ struct LockScreenWeatherWidget: View {
 					.foregroundStyle(Color.white)
 			}
 			.gaugeStyle(.accessoryCircular)
-			.tint(aqiTint(for: info.category))
+			.tint(aqiTint(for: info))
 			.frame(width: gaugeDiameter, height: gaugeDiameter)
 
-			Text("AQI · \(info.category.displayName)")
+			Text("\(info.scale.compactLabel) · \(info.category.displayName)")
 				.font(inlineSecondaryFont)
 				.foregroundStyle(secondaryLabelColor)
 				.lineLimit(1)
@@ -444,19 +447,27 @@ struct LockScreenWeatherWidget: View {
 		}
 	}
 
-	private func aqiTint(for category: LockScreenWeatherSnapshot.AirQualityInfo.Category) -> Color {
+	private func aqiTint(for info: LockScreenWeatherSnapshot.AirQualityInfo) -> Color {
 		guard snapshot.usesGaugeTint else { return monochromeGaugeTint }
-		switch category {
+		switch info.category {
 		case .good:
 			return Color(red: 0.20, green: 0.79, blue: 0.39)
+		case .fair:
+			return Color(red: 0.55, green: 0.85, blue: 0.32)
 		case .moderate:
 			return Color(red: 0.97, green: 0.82, blue: 0.30)
 		case .unhealthyForSensitive:
 			return Color(red: 0.98, green: 0.57, blue: 0.24)
 		case .unhealthy:
 			return Color(red: 0.91, green: 0.29, blue: 0.25)
+		case .poor:
+			return Color(red: 0.98, green: 0.57, blue: 0.24)
+		case .veryPoor:
+			return Color(red: 0.91, green: 0.29, blue: 0.25)
 		case .veryUnhealthy:
 			return Color(red: 0.65, green: 0.32, blue: 0.86)
+		case .extremelyPoor:
+			return Color(red: 0.50, green: 0.13, blue: 0.28)
 		case .hazardous:
 			return Color(red: 0.50, green: 0.13, blue: 0.28)
 		case .unknown:
@@ -560,7 +571,7 @@ struct LockScreenWeatherWidget: View {
 		String(
 			format: NSLocalizedString("Air quality index %d, %@", comment: "Air quality accessibility label"),
 			airQuality.index,
-			airQuality.category.displayName
+			"\(airQuality.scale.accessibilityLabel) \(airQuality.category.displayName)"
 		)
 	}
 

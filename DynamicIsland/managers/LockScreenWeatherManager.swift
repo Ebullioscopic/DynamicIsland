@@ -198,6 +198,8 @@ final class LockScreenWeatherManager: ObservableObject {
             Defaults.publisher(.lockScreenWeatherUsesGaugeTint, options: [])
                 .map { _ in () }.eraseToAnyPublisher(),
             Defaults.publisher(.lockScreenWeatherProviderSource, options: [])
+                .map { _ in () }.eraseToAnyPublisher(),
+            Defaults.publisher(.lockScreenWeatherAQIScale, options: [])
                 .map { _ in () }.eraseToAnyPublisher()
         ]
 
@@ -224,6 +226,17 @@ final class LockScreenWeatherManager: ObservableObject {
                 self.latestWeatherPayload = nil
                 Task { @MainActor in
                     NSLog("LockScreenWeatherManager: temperature unit changed, forcing refresh")
+                    _ = await self.refresh(force: true)
+                }
+            }
+            .store(in: &cancellables)
+
+        Defaults.publisher(.lockScreenWeatherAQIScale, options: [])
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.latestWeatherPayload = nil
+                Task { @MainActor in
+                    NSLog("LockScreenWeatherManager: AQI scale changed, forcing refresh")
                     _ = await self.refresh(force: true)
                 }
             }
@@ -419,20 +432,28 @@ struct LockScreenWeatherSnapshot: Equatable {
     struct AirQualityInfo: Equatable {
         enum Category: String, Equatable {
             case good
+            case fair
             case moderate
             case unhealthyForSensitive
             case unhealthy
+            case poor
+            case veryPoor
             case veryUnhealthy
+            case extremelyPoor
             case hazardous
             case unknown
 
             var displayName: String {
                 switch self {
                 case .good: return "Good"
+                case .fair: return "Fair"
                 case .moderate: return "Moderate"
                 case .unhealthyForSensitive: return "Sensitive"
                 case .unhealthy: return "Unhealthy"
+                case .poor: return "Poor"
+                case .veryPoor: return "Very Poor"
                 case .veryUnhealthy: return "Very Unhealthy"
+                case .extremelyPoor: return "Extremely Poor"
                 case .hazardous: return "Hazardous"
                 case .unknown: return "Unknown"
                 }
@@ -441,6 +462,7 @@ struct LockScreenWeatherSnapshot: Equatable {
 
         let index: Int
         let category: Category
+        let scale: LockScreenWeatherAirQualityScale
     }
 
     let temperatureText: String
@@ -459,24 +481,46 @@ struct LockScreenWeatherSnapshot: Equatable {
 }
 
 extension LockScreenWeatherSnapshot.AirQualityInfo.Category {
-    init(aqiValue: Int) {
-        switch aqiValue {
-        case ..<0:
-            self = .unknown
-        case 0...50:
-            self = .good
-        case 51...100:
-            self = .moderate
-        case 101...150:
-            self = .unhealthyForSensitive
-        case 151...200:
-            self = .unhealthy
-        case 201...300:
-            self = .veryUnhealthy
-        case 301...:
-            self = .hazardous
-        default:
-            self = .unknown
+    init(index: Int, scale: LockScreenWeatherAirQualityScale) {
+        switch scale {
+        case .us:
+            switch index {
+            case ..<0:
+                self = .unknown
+            case 0...50:
+                self = .good
+            case 51...100:
+                self = .moderate
+            case 101...150:
+                self = .unhealthyForSensitive
+            case 151...200:
+                self = .unhealthy
+            case 201...300:
+                self = .veryUnhealthy
+            case 301...:
+                self = .hazardous
+            default:
+                self = .unknown
+            }
+        case .european:
+            switch index {
+            case ..<0:
+                self = .unknown
+            case 0...20:
+                self = .good
+            case 21...40:
+                self = .fair
+            case 41...60:
+                self = .moderate
+            case 61...80:
+                self = .poor
+            case 81...100:
+                self = .veryPoor
+            case 101...:
+                self = .extremelyPoor
+            default:
+                self = .unknown
+            }
         }
     }
 }
@@ -570,9 +614,11 @@ private actor LockScreenWeatherProvider {
 
         let airQualityInfo: LockScreenWeatherSnapshot.AirQualityInfo?
         if let index = condition.airQuality?.usIndexValue {
+            let scale: LockScreenWeatherAirQualityScale = .us
             airQualityInfo = LockScreenWeatherSnapshot.AirQualityInfo(
                 index: index,
-                category: LockScreenWeatherSnapshot.AirQualityInfo.Category(aqiValue: index)
+                category: LockScreenWeatherSnapshot.AirQualityInfo.Category(index: index, scale: scale),
+                scale: scale
             )
         } else {
             airQualityInfo = nil
@@ -648,9 +694,11 @@ private actor LockScreenWeatherProvider {
             unitSymbol: unitSymbol
         )
 
+        let selectedScale = Defaults[.lockScreenWeatherAQIScale]
+
         var airQualityInfo: LockScreenWeatherSnapshot.AirQualityInfo?
         if Defaults[.lockScreenWeatherShowsAQI] {
-            airQualityInfo = try? await fetchOpenMeteoAirQuality(latitude: latitude, longitude: longitude)
+            airQualityInfo = try? await fetchOpenMeteoAirQuality(latitude: latitude, longitude: longitude, scale: selectedScale)
         }
 
         return LockScreenWeatherSnapshot(
@@ -670,12 +718,12 @@ private actor LockScreenWeatherProvider {
         )
     }
 
-    private func fetchOpenMeteoAirQuality(latitude: String, longitude: String) async throws -> LockScreenWeatherSnapshot.AirQualityInfo? {
+    private func fetchOpenMeteoAirQuality(latitude: String, longitude: String, scale: LockScreenWeatherAirQualityScale) async throws -> LockScreenWeatherSnapshot.AirQualityInfo? {
         var airComponents = URLComponents(string: "https://air-quality-api.open-meteo.com/v1/air-quality")
         airComponents?.queryItems = [
             URLQueryItem(name: "latitude", value: latitude),
             URLQueryItem(name: "longitude", value: longitude),
-            URLQueryItem(name: "current", value: "us_aqi"),
+            URLQueryItem(name: "current", value: scale.queryParameter),
             URLQueryItem(name: "timezone", value: "auto")
         ]
 
@@ -691,14 +739,27 @@ private actor LockScreenWeatherProvider {
         let airDecoder = JSONDecoder()
         airDecoder.keyDecodingStrategy = .convertFromSnakeCase
         let airPayload = try airDecoder.decode(OpenMeteoAirQualityResponse.self, from: airData)
-        guard let airCurrent = airPayload.current, let indexValue = airCurrent.usAqi else {
+        guard let airCurrent = airPayload.current else {
+            return nil
+        }
+
+        let rawValue: Double?
+        switch scale {
+        case .us:
+            rawValue = airCurrent.usAqi
+        case .european:
+            rawValue = airCurrent.europeanAqi
+        }
+
+        guard let indexValue = rawValue else {
             return nil
         }
 
         let index = Int(round(indexValue))
         return LockScreenWeatherSnapshot.AirQualityInfo(
             index: index,
-            category: LockScreenWeatherSnapshot.AirQualityInfo.Category(aqiValue: index)
+            category: LockScreenWeatherSnapshot.AirQualityInfo.Category(index: index, scale: scale),
+            scale: scale
         )
     }
 }
@@ -830,6 +891,7 @@ private struct OpenMeteoAirQualityResponse: Decodable {
     struct Current: Decodable {
         let time: String?
         let usAqi: Double?
+        let europeanAqi: Double?
     }
 
     let current: Current?

@@ -188,6 +188,7 @@ struct GeneralSettings: View {
     @Default(.lockScreenWeatherWidgetStyle) var lockScreenWeatherWidgetStyle
     @Default(.lockScreenWeatherTemperatureUnit) var lockScreenWeatherTemperatureUnit
     @Default(.lockScreenWeatherShowsAQI) var lockScreenWeatherShowsAQI
+    @Default(.lockScreenWeatherAQIScale) var lockScreenWeatherAQIScale
     @Default(.lockScreenWeatherUsesGaugeTint) var lockScreenWeatherUsesGaugeTint
     @Default(.lockScreenWeatherProviderSource) var lockScreenWeatherProviderSource
 
@@ -405,6 +406,14 @@ struct GeneralSettings: View {
                     Defaults.Toggle("Show Bluetooth battery", key: .lockScreenWeatherShowsBluetooth)
                     Defaults.Toggle("Show AQI widget", key: .lockScreenWeatherShowsAQI)
                         .disabled(!lockScreenWeatherProviderSource.supportsAirQuality)
+                    if lockScreenWeatherShowsAQI && lockScreenWeatherProviderSource.supportsAirQuality {
+                        Picker("Air quality scale", selection: $lockScreenWeatherAQIScale) {
+                            ForEach(LockScreenWeatherAirQualityScale.allCases) { scale in
+                                Text(scale.displayName).tag(scale)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
                     if !lockScreenWeatherProviderSource.supportsAirQuality {
                         Text("Air quality requires the Open Meteo provider.")
                             .font(.caption)
