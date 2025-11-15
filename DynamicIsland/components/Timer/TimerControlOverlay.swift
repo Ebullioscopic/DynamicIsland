@@ -41,6 +41,7 @@ struct TimerControlOverlay: View {
             .buttonStyle(.plain)
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .help(helpText)
+            .disabled(!timerManager.allowsManualInteraction)
 
             Button(action: stopTimer) {
                 Image(systemName: "stop.fill")
@@ -51,6 +52,7 @@ struct TimerControlOverlay: View {
             .buttonStyle(.plain)
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .help("Stop")
+            .disabled(!timerManager.allowsManualInteraction)
         }
         .padding(.horizontal, 12)
         .frame(height: notchHeight)
@@ -66,6 +68,7 @@ struct TimerControlOverlay: View {
     }
 
     private func togglePause() {
+        guard timerManager.allowsManualInteraction else { return }
         if timerManager.isPaused {
             timerManager.resumeTimer()
         } else {
@@ -74,6 +77,10 @@ struct TimerControlOverlay: View {
     }
 
     private func stopTimer() {
+        guard timerManager.allowsManualInteraction else {
+            timerManager.endExternalTimer(triggerSmoothClose: false)
+            return
+        }
 #if os(macOS)
         TimerControlWindowManager.shared.hide(animated: true)
 #endif

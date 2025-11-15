@@ -96,21 +96,20 @@ struct NotchTimerView: View {
     }
     
     private var controlsSection: some View {
-        VStack(spacing: 20) {
-            if timerManager.isTimerActive {
-                // Active timer controls
-                activeTimerControls
-            } else {
-                // Quick timer setup
+        VStack(alignment: .leading, spacing: 20) {
+            if timerManager.allowsManualInteraction {
+                manualControlButtons
                 quickTimerControls
+            } else {
+                externalTimerNotice
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
-    
-    private var activeTimerControls: some View {
-        VStack(spacing: 16) {
+
+    private var manualControlButtons: some View {
+        VStack(alignment: .leading, spacing: 16) {
             if timerManager.isOvertime {
-                // Overtime controls - only show stop button
                 Button(action: {
                     timerManager.forceStopTimer()
                 }) {
@@ -128,17 +127,9 @@ struct NotchTimerView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .buttonStyle(PlainButtonStyle())
-                .onHover { isHovering in
-                    if isHovering {
-                        NSCursor.pointingHand.push()
-                    } else {
-                        NSCursor.pop()
-                    }
-                }
+                .onHover(perform: cursorHover)
             } else {
-                // Normal timer controls
                 HStack(spacing: 16) {
-                    // Pause/Resume button
                     Button(action: {
                         if timerManager.isPaused {
                             timerManager.resumeTimer()
@@ -159,15 +150,8 @@ struct NotchTimerView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .onHover { isHovering in
-                        if isHovering {
-                            NSCursor.pointingHand.push()
-                        } else {
-                            NSCursor.pop()
-                        }
-                    }
-                    
-                    // Stop button
+                    .onHover(perform: cursorHover)
+
                     Button(action: {
                         timerManager.stopTimer()
                     }) {
@@ -180,34 +164,30 @@ struct NotchTimerView: View {
                         .foregroundStyle(.white)
                         .frame(height: 40)
                         .frame(minWidth: 100)
-                        .background(.white.opacity(0.15))
+                        .background(.white.opacity(0.1))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .onHover { isHovering in
-                        if isHovering {
-                            NSCursor.pointingHand.push()
-                        } else {
-                            NSCursor.pop()
-                        }
-                    }
+                    .onHover(perform: cursorHover)
                 }
             }
         }
     }
-    
+
     private var quickTimerControls: some View {
-        VStack(spacing: 16) {
-            // Quick timer grid
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Quick Start")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.secondary)
+
             VStack(spacing: 12) {
                 HStack(spacing: 12) {
-                    quickTimerButton(minutes: 1, title: "1 min")
-                    quickTimerButton(minutes: 5, title: "5 min")
-                    quickTimerButton(minutes: 15, title: "15 min")
+                    quickTimerButton(minutes: 1)
+                    quickTimerButton(minutes: 5)
+                    quickTimerButton(minutes: 15)
                 }
-                
+
                 HStack(spacing: 12) {
-                    // Custom timer button
                     Button(action: {
                         timerManager.startTimer(duration: customTimerDuration, name: "Custom Timer")
                     }) {
@@ -229,17 +209,37 @@ struct NotchTimerView: View {
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .onHover { isHovering in
-                        if isHovering {
-                            NSCursor.pointingHand.push()
-                        } else {
-                            NSCursor.pop()
-                        }
-                    }
+                    .onHover(perform: cursorHover)
                 }
             }
         }
+    }
+
+    private var externalTimerNotice: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Manage the Clock timer from the Clock app.")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            Button(action: {
+                timerManager.endExternalTimer(triggerSmoothClose: false)
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "eye.slash")
+                        .font(.system(size: 16, weight: .medium))
+                    Text("Hide from Notch")
+                        .font(.system(size: 16, weight: .medium))
+                }
+                .foregroundStyle(.white)
+                .frame(height: 40)
+                .frame(minWidth: 140)
+                .background(.white.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(PlainButtonStyle())
+            .onHover(perform: cursorHover)
         }
+    }
     
     private var customTimerDisplayText: String {
         let totalMinutes = Int(customTimerDuration) / 60
@@ -256,7 +256,7 @@ struct NotchTimerView: View {
         }
     }
     
-    private func quickTimerButton(minutes: Int, title: String) -> some View {
+    private func quickTimerButton(minutes: Int) -> some View {
         Button(action: {
             timerManager.startTimer(duration: TimeInterval(minutes * 60), name: "\(minutes) Min Timer")
         }) {
@@ -277,13 +277,7 @@ struct NotchTimerView: View {
             )
         }
         .buttonStyle(PlainButtonStyle())
-        .onHover { isHovering in
-            if isHovering {
-                NSCursor.pointingHand.push()
-            } else {
-                NSCursor.pop()
-            }
-        }
+        .onHover(perform: cursorHover)
     }
 }
 
@@ -291,6 +285,14 @@ private extension NotchTimerView {
     var openIconColor: Color {
         guard timerManager.isTimerActive && timerManager.isRunning else { return .white.opacity(0.9) }
         return timerManager.currentColor
+    }
+
+    private func cursorHover(_ isHovering: Bool) {
+        if isHovering {
+            NSCursor.pointingHand.push()
+        } else {
+            NSCursor.pop()
+        }
     }
 }
 

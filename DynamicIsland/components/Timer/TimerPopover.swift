@@ -158,6 +158,7 @@ private struct ActiveTimerSection: View {
                         .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(.bordered)
+                .disabled(!timerManager.allowsManualInteraction)
                 
                 Button(role: .destructive, action: stopTimer) {
                     Label("Stop", systemImage: "stop.fill")
@@ -165,6 +166,7 @@ private struct ActiveTimerSection: View {
                         .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(!timerManager.allowsManualInteraction)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -175,6 +177,7 @@ private struct ActiveTimerSection: View {
     }
     
     private func togglePause() {
+        guard timerManager.allowsManualInteraction else { return }
         withAnimation(.smooth) {
             if timerManager.isPaused {
                 timerManager.resumeTimer()
@@ -185,6 +188,10 @@ private struct ActiveTimerSection: View {
     }
     
     private func stopTimer() {
+        guard timerManager.allowsManualInteraction else {
+            timerManager.endExternalTimer(triggerSmoothClose: false)
+            return
+        }
         withAnimation(.smooth) {
             timerManager.stopTimer()
         }

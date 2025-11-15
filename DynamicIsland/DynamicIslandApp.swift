@@ -100,6 +100,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let bluetoothAudioManager = BluetoothAudioManager.shared  // NEW: Bluetooth audio detection
     let idleAnimationManager = IdleAnimationManager.shared  // NEW: Custom idle animations
     let lockScreenPanelManager = LockScreenPanelManager.shared  // NEW: Lock screen music panel
+    let systemTimerBridge = SystemTimerBridge.shared
     var closeNotchWorkItem: DispatchWorkItem?
     private var previousScreens: [NSScreen]?
     private var onboardingWindowController: NSWindowController?

@@ -26,6 +26,7 @@ class TimerManager: ObservableObject {
     @Published var isOvertime: Bool = false // Timer has gone past 0 and is counting negative
     @Published var lastUpdated: Date = .distantPast
     @Published var activePresetId: UUID?
+    @Published private(set) var activeSource: TimerSource = .none
     
     // Timer progress (0.0 to 1.0, or >1.0 for overtime)
     var progress: Double {
@@ -113,7 +114,6 @@ class TimerManager: ObservableObject {
     private var timerInstance: Timer?
     private var cancellables = Set<AnyCancellable>()
     private var soundPlayer: AVAudioPlayer?
-    
     // MARK: - Initialization
     private init() {
         // Simple initialization
@@ -127,6 +127,10 @@ class TimerManager: ObservableObject {
     
     // MARK: - Timer Methods
     func startTimer(duration: TimeInterval, name: String = "Timer", preset: TimerPreset? = nil) {
+        if activeSource == .external {
+            endExternalTimer(triggerSmoothClose: false)
+        }
+
         // Stop any existing timer
         timerInstance?.invalidate()
         
@@ -134,6 +138,7 @@ class TimerManager: ObservableObject {
         withAnimation(.smooth) {
             isTimerActive = true
         }
+        activeSource = .manual
         isFinished = false
         isOvertime = false
         timerName = name
@@ -178,6 +183,11 @@ class TimerManager: ObservableObject {
     }
     
     func stopTimer() {
+        if activeSource == .external {
+            endExternalTimer(triggerSmoothClose: true)
+            return
+        }
+
         timerInstance?.invalidate()
         timerInstance = nil
         soundPlayer?.stop()
@@ -191,6 +201,11 @@ class TimerManager: ObservableObject {
     }
     
     func forceStopTimer() {
+        if activeSource == .external {
+            endExternalTimer(triggerSmoothClose: false)
+            return
+        }
+
         // Immediate stop for user action (stop button)
         timerInstance?.invalidate()
         timerInstance = nil
@@ -202,6 +217,7 @@ class TimerManager: ObservableObject {
     }
     
     func pauseTimer() {
+        guard activeSource == .manual else { return }
         guard isTimerActive && !isPaused else { return }
         isPaused = true
         timerInstance?.invalidate()
@@ -209,6 +225,7 @@ class TimerManager: ObservableObject {
     }
     
     func resumeTimer() {
+        guard activeSource == .manual else { return }
         guard isTimerActive && isPaused else { return }
         isPaused = false
         lastUpdated = Date()
@@ -240,6 +257,78 @@ class TimerManager: ObservableObject {
             }
         }
     }
+
+    func adoptExternalTimer(name: String, totalDuration: TimeInterval, remaining: TimeInterval, isPaused: Bool) {
+        guard activeSource != .manual else { return }
+
+        timerInstance?.invalidate()
+        timerInstance = nil
+        soundPlayer?.stop()
+
+        activeSource = .external
+
+        let clampedTotal = totalDuration > 0 ? totalDuration : max(totalDuration, remaining)
+
+        withAnimation(.smooth) {
+            isTimerActive = true
+        }
+
+        timerName = name.isEmpty ? "Clock Timer" : name
+        self.totalDuration = clampedTotal
+        remainingTime = remaining
+        elapsedTime = max(0, clampedTotal - remaining)
+        self.isPaused = isPaused
+        isFinished = false
+        isOvertime = remaining < 0
+        activePresetId = nil
+        lastUpdated = Date()
+    }
+
+    func updateExternalTimer(remaining: TimeInterval, totalDuration: TimeInterval?, isPaused paused: Bool, name: String? = nil) {
+        guard activeSource == .external else { return }
+
+        if let name, !name.isEmpty, name != timerName {
+            timerName = name
+        }
+
+        if let totalDuration, totalDuration > 0 {
+            self.totalDuration = max(totalDuration, self.totalDuration)
+        } else if self.totalDuration <= 0 {
+            self.totalDuration = max(self.totalDuration, remaining)
+        }
+
+        remainingTime = remaining
+        elapsedTime = max(0, self.totalDuration - remaining)
+        isOvertime = remaining < 0
+        isPaused = paused
+        isFinished = remaining <= 0 && !isOvertime
+        lastUpdated = Date()
+    }
+
+    func completeExternalTimer() {
+        guard activeSource == .external else { return }
+
+        remainingTime = 0
+        elapsedTime = totalDuration
+        isOvertime = false
+        isFinished = true
+        lastUpdated = Date()
+        scheduleSmoothClose()
+    }
+
+    func endExternalTimer(triggerSmoothClose: Bool) {
+        guard activeSource == .external else { return }
+
+        if triggerSmoothClose && isTimerActive {
+            scheduleSmoothClose()
+        } else {
+            withAnimation(.smooth) {
+                isTimerActive = false
+            }
+        }
+
+        resetTimer()
+    }
     
     private func resetTimer() {
         withAnimation(.smooth) {
@@ -253,12 +342,31 @@ class TimerManager: ObservableObject {
         isFinished = false
         isOvertime = false
         activePresetId = nil
+        activeSource = .none
     }
 
     // MARK: - Derived State
     var activePreset: TimerPreset? {
         guard let presetId = activePresetId else { return nil }
         return Defaults[.timerPresets].first { $0.id == presetId }
+    }
+
+    var isExternalTimerActive: Bool {
+        activeSource == .external && isTimerActive
+    }
+
+    var hasManualTimerRunning: Bool {
+        activeSource == .manual && isTimerActive
+    }
+
+    var allowsManualInteraction: Bool {
+        activeSource != .external
+    }
+
+    enum TimerSource: String {
+        case none
+        case manual
+        case external
     }
 
     private func scheduleSmoothClose() {

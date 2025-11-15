@@ -1843,6 +1843,7 @@ struct TimerSettings: View {
     @Default(.timerShowsProgress) private var showsProgress
     @Default(.timerProgressStyle) private var progressStyle
     @Default(.timerControlWindowEnabled) private var controlWindowEnabled
+    @Default(.mirrorSystemTimer) private var mirrorSystemTimer
     @AppStorage("customTimerDuration") private var customTimerDuration: Double = 600
     @State private var customHours: Int = 0
     @State private var customMinutes: Int = 10
@@ -1857,11 +1858,13 @@ struct TimerSettings: View {
                 if enableTimerFeature {
                     Toggle("Enable timer live activity", isOn: $coordinator.timerLiveActivityEnabled)
                         .animation(.easeInOut, value: coordinator.timerLiveActivityEnabled)
+                    Defaults.Toggle("Mirror macOS Clock timers", key: .mirrorSystemTimer)
+                        .help("Shows the system Clock timer in the notch when available. Requires Accessibility permission to read the status item.")
                 }
             } header: {
                 Text("Timer Feature")
             } footer: {
-                Text("Control timer availability and whether progress appears as a live activity while the notch is closed.")
+                Text("Control timer availability, live activity behaviour, and whether the app mirrors timers started from the macOS Clock app.")
             }
             
             if enableTimerFeature {
