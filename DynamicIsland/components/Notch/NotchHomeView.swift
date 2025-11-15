@@ -155,6 +155,18 @@ struct MusicControlsView: View {
                 frameWidth: width
             )
             .fontWeight(.medium)
+            // Lyrics shown under the author name (same font size as author) when enabled in settings
+            if Defaults[.enableLyrics] {
+                Text(musicManager.currentLyrics)
+                    .font(.headline)
+                    .foregroundColor(.white.opacity(0.8))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 2)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.3), value: musicManager.currentLyrics)
+            }
         }
     }
 

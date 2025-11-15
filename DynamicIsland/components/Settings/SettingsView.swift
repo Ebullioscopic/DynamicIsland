@@ -908,6 +908,7 @@ struct Media: View {
                     isOn: $coordinator.musicLiveActivityEnabled.animation()
                 )
                 Toggle("Enable sneak peek", isOn: $enableSneakPeek)
+                Defaults.Toggle("Enable lyrics", key: .enableLyrics)
                 Picker("Sneak Peek Style", selection: $sneakPeekStyles){
                     ForEach(SneakPeekStyle.allCases) { style in
                         Text(style.rawValue).tag(style)

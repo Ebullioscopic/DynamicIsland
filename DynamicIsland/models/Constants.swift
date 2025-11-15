@@ -530,6 +530,9 @@ extension Defaults.Keys {
     // MARK: Minimalistic UI Mode
     static let enableMinimalisticUI = Key<Bool>("enableMinimalisticUI", default: false)
     
+    // MARK: Lyrics Feature
+    static let enableLyrics = Key<Bool>("enableLyrics", default: true)
+    
     // Helper to determine the default media controller based on macOS version
     static var defaultMediaController: MediaControllerType {
         if #available(macOS 15.4, *) {

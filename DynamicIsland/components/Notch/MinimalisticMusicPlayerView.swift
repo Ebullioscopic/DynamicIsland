@@ -12,12 +12,15 @@ import Defaults
 import AppKit
 #endif
 
+// Lyrics are shown/hidden only via Defaults[.enableLyrics] in settings. Inline display is used in the player views.
+
 struct MinimalisticMusicPlayerView: View {
     @EnvironmentObject var vm: DynamicIslandViewModel
     let albumArtNamespace: Namespace.ID
     @Default(.showMediaOutputControl) var showMediaOutputControl
     @ObservedObject private var reminderManager = ReminderLiveActivityManager.shared
     @Default(.enableReminderLiveActivity) private var enableReminderLiveActivity
+    @Default(.enableLyrics) private var enableLyrics
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,6 +49,19 @@ struct MinimalisticMusicPlayerView: View {
                             .font(.system(size: 10, weight: .regular))
                             .foregroundColor(Defaults[.playerColorTinting] ? Color(nsColor: musicManager.avgColor).ensureMinimumBrightness(factor: 0.6) : .gray)
                             .lineLimit(1)
+
+                        // Lyrics shown under the author name, same font size as author
+                        if enableLyrics {
+                            Text(musicManager.currentLyrics)
+                                .font(.system(size: 10, weight: .regular))
+                                .foregroundColor(.white.opacity(0.8))
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 4)
+                                .transition(.opacity)
+                                .animation(.easeInOut(duration: 0.3), value: musicManager.currentLyrics)
+                        }
                     }
                     .frame(width: textWidth, alignment: .leading)
 
@@ -65,12 +81,75 @@ struct MinimalisticMusicPlayerView: View {
             playbackControls
                 .padding(.top, 4)
 
+            // Lyrics are displayed inline under the artist name (see header area)
+
             reminderList
         }
         .padding(.horizontal, 12)
         .padding(.top, -15)
-    .padding(.bottom, shouldShowReminderList ? ReminderLiveActivityManager.listBottomPadding : ReminderLiveActivityManager.baselineMinimalisticBottomPadding)
+        .padding(.bottom, shouldShowReminderList ? ReminderLiveActivityManager.listBottomPadding : ReminderLiveActivityManager.baselineMinimalisticBottomPadding)
         .frame(maxWidth: .infinity)
+        .frame(height: calculateDynamicHeight(), alignment: .center)
+    .animation(.easeInOut(duration: 0.3), value: musicManager.currentLyrics)
+    }
+
+    // MARK: - TypingLyricView
+
+    struct TypingLyricView: View {
+        let text: String
+        let color: Color
+        let id: Int
+        let playbackRate: Double
+        let isPlaying: Bool
+        @State private var displayed: String = ""
+        @State private var lastText: String = ""
+        @State private var animationTask: Task<Void, Never>?
+
+        var body: some View {
+            Text(displayed)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(color)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+                .padding(.top, 4)
+                .id(id)
+                .onChange(of: text) { _, newText in
+                    animateTyping(newText)
+                }
+                .onChange(of: isPlaying) { _, playing in
+                    if !playing {
+                        animationTask?.cancel()
+                    } else if displayed != text {
+                        animateTyping(text)
+                    }
+                }
+                .onAppear {
+                    animateTyping(text)
+                }
+                .onDisappear {
+                    animationTask?.cancel()
+                }
+        }
+
+        private func animateTyping(_ newText: String) {
+            animationTask?.cancel()
+            displayed = ""
+            lastText = newText
+            let chars = Array(newText)
+
+            animationTask = Task {
+                for (i, c) in chars.enumerated() {
+                    if Task.isCancelled { return }
+                    try? await Task.sleep(for: .milliseconds(Int(30 / max(playbackRate, 0.1))))
+                    if Task.isCancelled { return }
+                    if lastText == newText {
+                        displayed += String(c)
+                    }
+                }
+            }
+        }
     }
 
     private var reminderEntries: [ReminderLiveActivityManager.ReminderEntry] {
@@ -83,6 +162,32 @@ struct MinimalisticMusicPlayerView: View {
 
     private var reminderListHeight: CGFloat {
         ReminderLiveActivityManager.additionalHeight(forRowCount: reminderEntries.count)
+    }
+
+    private func calculateDynamicHeight() -> CGFloat {
+        var height: CGFloat = 50 // Base height for header
+
+        // Add progress bar height
+        height += 6 + 4 // progress bar + top padding
+
+        // Add playback controls height
+        height += 40 + 2 // controls + top padding
+
+        // Add lyrics height if enabled in settings (reserve space even while loading)
+        if Defaults[.enableLyrics] {
+            height += 20 + 4 // lyrics + top padding
+        }
+
+        // Add reminder list height if showing
+        if shouldShowReminderList {
+            height += reminderListHeight + ReminderLiveActivityManager.listTopPadding
+        }
+
+        // Add padding
+        height += 15 // top padding
+        height += shouldShowReminderList ? ReminderLiveActivityManager.listBottomPadding : ReminderLiveActivityManager.baselineMinimalisticBottomPadding
+
+        return height
     }
 
     private var reminderList: some View {
@@ -472,23 +577,25 @@ private struct MinimalisticReminderDetailsView: View {
     // MARK: - Playback Controls (Larger)
     
     private var playbackControls: some View {
-        HStack(spacing: 20) {
+        HStack(spacing: 16) {
             if Defaults[.showShuffleAndRepeat] {
                 controlButton(icon: "shuffle", isActive: musicManager.isShuffled) {
                     Task { await musicManager.toggleShuffle() }
                 }
             }
-            
+
             controlButton(icon: "backward.fill", size: 18) {
                 Task { await musicManager.previousTrack() }
             }
-            
+
             playPauseButton
-            
+
             controlButton(icon: "forward.fill", size: 18) {
                 Task { await musicManager.nextTrack() }
             }
-            
+
+            // (lyrics toggle removed from UI; controlled via Settings -> Media -> Enable Lyrics)
+
             if Defaults[.showShuffleAndRepeat] {
                 if showMediaOutputControl {
                     MinimalisticMediaOutputButton()
