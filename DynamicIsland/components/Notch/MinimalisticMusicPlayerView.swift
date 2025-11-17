@@ -670,7 +670,7 @@ private struct MinimalisticReminderDetailsView: View {
                 Task { await musicManager.toggleShuffle() }
             }
         case .repeatMode:
-            controlButton(icon: repeatIcon, isActive: musicManager.repeatMode != .off) {
+            controlButton(icon: repeatIcon, isActive: musicManager.repeatMode != .off, symbolEffect: .replace) {
                 Task { await musicManager.toggleRepeat() }
             }
         case .mediaOutput:
@@ -706,7 +706,8 @@ private struct MinimalisticReminderDetailsView: View {
                 fontWeight: .medium,
                 frameSize: CGSize(width: 40, height: 40),
                 cornerRadius: 16,
-                foregroundColor: .white.opacity(0.85)
+                foregroundColor: .white.opacity(0.85),
+                symbolEffectStyle: .replace
             ) {
                 isPopoverPresented.toggle()
                 if isPopoverPresented {

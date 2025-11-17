@@ -230,8 +230,15 @@ enum MusicAuxiliaryControl: String, CaseIterable, Identifiable, Defaults.Seriali
         }
     }
 
-    static func alternative(excluding control: MusicAuxiliaryControl) -> MusicAuxiliaryControl {
-        allCases.first { $0 != control } ?? .shuffle
+    static func alternative(
+        excluding control: MusicAuxiliaryControl,
+        preferring candidate: MusicAuxiliaryControl? = nil
+    ) -> MusicAuxiliaryControl {
+        if let candidate, candidate != control {
+            return candidate
+        }
+
+        return allCases.first { $0 != control } ?? .shuffle
     }
 }
 
@@ -596,12 +603,22 @@ extension Defaults.Keys {
     }
 
     static func migrateMusicAuxControls() {
-        guard Defaults[.didMigrateMusicAuxControls] == false else { return }
+        if Defaults[.didMigrateMusicAuxControls] == false {
+            if Defaults[.showMediaOutputControl] {
+                Defaults[.musicAuxRightControl] = .mediaOutput
+            }
 
-        if Defaults[.showMediaOutputControl] {
-            Defaults[.musicAuxRightControl] = .mediaOutput
+            Defaults[.didMigrateMusicAuxControls] = true
         }
 
-        Defaults[.didMigrateMusicAuxControls] = true
+        normalizeMusicAuxControls()
+    }
+
+    private static func normalizeMusicAuxControls() {
+        guard Defaults[.musicAuxLeftControl] == Defaults[.musicAuxRightControl] else { return }
+
+        let current = Defaults[.musicAuxLeftControl]
+        let fallback = MusicAuxiliaryControl.alternative(excluding: current)
+        Defaults[.musicAuxRightControl] = fallback
     }
 }
