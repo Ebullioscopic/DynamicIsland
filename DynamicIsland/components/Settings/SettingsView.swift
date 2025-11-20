@@ -1436,6 +1436,8 @@ struct Appearance: View {
                 Text("General")
             }
 
+            LockScreenPositioningControls()
+
             Section {
                 Defaults.Toggle("Enable colored spectrograms", key: .coloredSpectrogram)
                 Defaults
@@ -1690,6 +1692,228 @@ struct Appearance: View {
         }
 
         return false
+    }
+}
+
+private struct LockScreenPositioningControls: View {
+    @Default(.lockScreenWeatherVerticalOffset) private var weatherOffset
+    @Default(.lockScreenMusicVerticalOffset) private var musicOffset
+    private let offsetRange: ClosedRange<Double> = -160...160
+
+    var body: some View {
+        Section {
+            let weatherBinding = Binding<Double>(
+                get: { weatherOffset },
+                set: { newValue in
+                    let clampedValue = clamp(newValue)
+                    if weatherOffset != clampedValue {
+                        weatherOffset = clampedValue
+                    }
+                    propagateWeatherOffsetChange(animated: false)
+                }
+            )
+
+            let musicBinding = Binding<Double>(
+                get: { musicOffset },
+                set: { newValue in
+                    let clampedValue = clamp(newValue)
+                    if musicOffset != clampedValue {
+                        musicOffset = clampedValue
+                    }
+                    propagateMusicOffsetChange(animated: false)
+                }
+            )
+
+            LockScreenPositioningPreview(weatherOffset: weatherBinding, musicOffset: musicBinding)
+                .frame(height: 260)
+                .padding(.vertical, 8)
+
+            HStack(alignment: .top, spacing: 24) {
+                offsetColumn(
+                    title: "Weather",
+                    value: weatherOffset,
+                    resetTitle: "Reset Weather",
+                    resetAction: resetWeatherOffset
+                )
+
+                Divider()
+                    .frame(height: 64)
+
+                offsetColumn(
+                    title: "Music",
+                    value: musicOffset,
+                    resetTitle: "Reset Music",
+                    resetAction: resetMusicOffset
+                )
+
+                Spacer()
+            }
+        } header: {
+            Text("Lock Screen Positioning")
+        } footer: {
+            Text("Drag the previews to adjust vertical placement. Positive values lift the panel; negative values lower it. Changes apply instantly while the widgets are visible.")
+                .textCase(nil)
+        }
+    }
+
+    private func clamp(_ value: Double) -> Double {
+        min(max(value, offsetRange.lowerBound), offsetRange.upperBound)
+    }
+
+    private func resetWeatherOffset() {
+        weatherOffset = 0
+        propagateWeatherOffsetChange(animated: true)
+    }
+
+    private func resetMusicOffset() {
+        musicOffset = 0
+        propagateMusicOffsetChange(animated: true)
+    }
+
+    private func propagateWeatherOffsetChange(animated: Bool) {
+        Task { @MainActor in
+            LockScreenWeatherPanelManager.shared.refreshPositionForOffsets(animated: animated)
+        }
+    }
+
+    private func propagateMusicOffsetChange(animated: Bool) {
+        Task { @MainActor in
+            LockScreenPanelManager.shared.applyOffsetAdjustment(animated: animated)
+        }
+    }
+
+    @ViewBuilder
+    private func offsetColumn(title: String, value: Double, resetTitle: String, resetAction: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("\(title) Offset")
+                .font(.subheadline.weight(.semibold))
+
+            Text("\(formattedPoints(value)) pt")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button(resetTitle) {
+                resetAction()
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private func formattedPoints(_ value: Double) -> String {
+        String(format: "%+.0f", value)
+    }
+}
+
+private struct LockScreenPositioningPreview: View {
+    @Binding var weatherOffset: Double
+    @Binding var musicOffset: Double
+
+    @State private var weatherStartOffset: Double = 0
+    @State private var musicStartOffset: Double = 0
+    @State private var isWeatherDragging = false
+    @State private var isMusicDragging = false
+
+    var body: some View {
+        GeometryReader { geometry in
+            let centerX = geometry.size.width / 2
+            let weatherBaseY = geometry.size.height * 0.34
+            let musicBaseY = geometry.size.height * 0.70
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.6))
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+
+                weatherPanel
+                    .position(x: centerX, y: weatherBaseY - CGFloat(weatherOffset))
+                    .gesture(weatherDragGesture)
+
+                musicPanel
+                    .position(x: centerX, y: musicBaseY - CGFloat(musicOffset))
+                    .gesture(musicDragGesture)
+            }
+        }
+        .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.82), value: weatherOffset)
+        .animation(.interactiveSpring(response: 0.3, dampingFraction: 0.82), value: musicOffset)
+    }
+
+    private var weatherPanel: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [Color.blue.opacity(0.72), Color.blue.opacity(0.48)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .frame(width: 220, height: 88)
+            .overlay(alignment: .leading) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Weather", systemImage: "cloud.sun.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.white)
+                    Text("Inline snapshot preview")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.7))
+                }
+                .padding(.horizontal, 18)
+            }
+            .shadow(color: Color.blue.opacity(0.25), radius: 12, x: 0, y: 8)
+    }
+
+    private var musicPanel: some View {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [Color.purple.opacity(0.68), Color.pink.opacity(0.52)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .frame(width: 280, height: 132)
+            .overlay(alignment: .leading) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Media", systemImage: "play.square.stack")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.white)
+                    Text("Lock screen panel preview")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.7))
+                }
+                .padding(.horizontal, 22)
+            }
+            .shadow(color: Color.purple.opacity(0.3), radius: 16, x: 0, y: 10)
+    }
+
+    private var weatherDragGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                if !isWeatherDragging {
+                    isWeatherDragging = true
+                    weatherStartOffset = weatherOffset
+                }
+                let proposed = weatherStartOffset - Double(value.translation.height)
+                weatherOffset = proposed
+            }
+            .onEnded { _ in
+                isWeatherDragging = false
+            }
+    }
+
+    private var musicDragGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                if !isMusicDragging {
+                    isMusicDragging = true
+                    musicStartOffset = musicOffset
+                }
+                let proposed = musicStartOffset - Double(value.translation.height)
+                musicOffset = proposed
+            }
+            .onEnded { _ in
+                isMusicDragging = false
+            }
     }
 }
 

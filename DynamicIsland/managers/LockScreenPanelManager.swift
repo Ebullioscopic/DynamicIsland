@@ -23,6 +23,8 @@ class LockScreenPanelManager {
     private var panelWindow: NSWindow?
     private var hasDelegated = false
     private var collapsedFrame: NSRect?
+    private var isPanelExpanded = false
+    private var currentAdditionalHeight: CGFloat = 0
     private let collapsedPanelCornerRadius: CGFloat = 28
     private let expandedPanelCornerRadius: CGFloat = 52
     private(set) var latestFrame: NSRect?
@@ -53,13 +55,11 @@ class LockScreenPanelManager {
             return
         }
 
-        let collapsedSize = LockScreenMusicPanel.collapsedSize
         let screenFrame = screen.frame
-        let centerX = screenFrame.origin.x + (screenFrame.width / 2)
-        let originX = centerX - (collapsedSize.width / 2)
-        let originY = screenFrame.origin.y + (screenFrame.height / 2) - collapsedSize.height - 32
-        let targetFrame = NSRect(x: originX, y: originY, width: collapsedSize.width, height: collapsedSize.height)
+        let targetFrame = collapsedFrame(for: screenFrame)
         collapsedFrame = targetFrame
+        isPanelExpanded = false
+        currentAdditionalHeight = 0
 
         let window: NSWindow
 
@@ -152,6 +152,19 @@ class LockScreenPanelManager {
         } else {
             window.contentView?.layer?.cornerRadius = targetRadius
         }
+
+        isPanelExpanded = expanded
+        currentAdditionalHeight = additionalHeight
+    }
+
+    func applyOffsetAdjustment(animated: Bool = true) {
+        guard let screen = NSScreen.main else { return }
+        let screenFrame = screen.frame
+        let newCollapsed = collapsedFrame(for: screenFrame)
+        collapsedFrame = newCollapsed
+
+        guard panelWindow != nil else { return }
+        updatePanelSize(expanded: isPanelExpanded, additionalHeight: currentAdditionalHeight, animated: animated)
     }
 
     func hidePanel() {
@@ -176,5 +189,15 @@ class LockScreenPanelManager {
                 print("[\(self.timestamp())] LockScreenPanelManager: panel hidden")
             }
         }
+    }
+
+    private func collapsedFrame(for screenFrame: NSRect) -> NSRect {
+        let collapsedSize = LockScreenMusicPanel.collapsedSize
+        let originX = screenFrame.midX - (collapsedSize.width / 2)
+        let baseOriginY = screenFrame.origin.y + (screenFrame.height / 2) - collapsedSize.height - 32
+        let userOffset = CGFloat(Defaults[.lockScreenMusicVerticalOffset])
+        let clampedOffset = min(max(userOffset, -160), 160)
+        let originY = baseOriginY + clampedOffset
+        return NSRect(x: originX, y: originY, width: collapsedSize.width, height: collapsedSize.height)
     }
 }
