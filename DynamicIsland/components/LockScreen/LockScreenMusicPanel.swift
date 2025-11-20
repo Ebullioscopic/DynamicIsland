@@ -420,18 +420,20 @@ struct LockScreenMusicPanel: View {
     private func controlsRow(alignment: Alignment, spacing: CGFloat) -> some View {
         let controls = resolvedAuxControls
 
+        let skipNudge: CGFloat = isExpanded ? 14 : 9
+
         return HStack(spacing: spacing) {
             if let leftControl = controls.left {
                 auxButton(for: leftControl)
             }
 
-            controlButton(icon: "backward.fill", size: 18) {
+            controlButton(icon: "backward.fill", size: 18, pressNudge: -skipNudge) {
                 musicManager.previousTrack()
             }
 
             playPauseButton
 
-            controlButton(icon: "forward.fill", size: 18) {
+            controlButton(icon: "forward.fill", size: 18, pressNudge: skipNudge) {
                 musicManager.nextTrack()
             }
 
@@ -453,6 +455,7 @@ struct LockScreenMusicPanel: View {
             Image(systemName: musicManager.isPlaying ? "pause.fill" : "play.fill")
                 .font(.system(size: symbolSize, weight: .semibold))
                 .foregroundColor(.white)
+                .contentTransition(.symbolEffect(.replace))
                 .frame(width: frameSize, height: frameSize)
                 .contentShape(Rectangle())
         }
@@ -464,37 +467,41 @@ struct LockScreenMusicPanel: View {
         size: CGFloat = 18,
         isActive: Bool = false,
         activeColor: Color = .red,
+        pressNudge: CGFloat? = nil,
         action: @escaping () -> Void
     ) -> some View {
         let frameSize: CGFloat = isExpanded ? 56 : 32
         let iconSize: CGFloat = isExpanded ? max(size, 24) : size
+        let iconColor = isActive ? activeColor : .white.opacity(0.8)
+        let backgroundOpacity: Double = isActive ? 0.22 : 0.0
 
-        return Button(action: {
+        return PanelControlButton(
+            icon: icon,
+            frameSize: frameSize,
+            iconSize: iconSize,
+            iconColor: iconColor,
+            backgroundOpacity: backgroundOpacity,
+            pressNudge: pressNudge
+        ) {
             registerInteraction()
             action()
-        }) {
-            Image(systemName: icon)
-                .font(.system(size: iconSize, weight: .medium))
-                .foregroundColor(isActive ? activeColor : .white.opacity(0.8))
-                .frame(width: frameSize, height: frameSize)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(PlainButtonStyle())
     }
     
     private var mediaOutputControlButton: some View {
         let frameSize: CGFloat = isExpanded ? 56 : 32
         let iconSize: CGFloat = isExpanded ? 26 : 18
 
-        return Button(action: toggleVolumeSlider) {
-            Image(systemName: mediaOutputIcon)
-                .font(.system(size: iconSize, weight: .medium))
-                .foregroundColor(shouldShowVolumeSlider ? .accentColor : .white.opacity(0.8))
-                .frame(width: frameSize, height: frameSize)
-                .contentShape(Rectangle())
-        }
+        return PanelControlButton(
+            icon: mediaOutputIcon,
+            frameSize: frameSize,
+            iconSize: iconSize,
+            iconColor: shouldShowVolumeSlider ? .accentColor : .white.opacity(0.8),
+            backgroundOpacity: shouldShowVolumeSlider ? 0.22 : 0.0,
+            pressNudge: nil,
+            action: toggleVolumeSlider
+        )
         .accessibilityLabel("Media output")
-        .buttonStyle(PlainButtonStyle())
     }
 
     private func lyricsSection(alignment: Alignment) -> some View {
@@ -789,5 +796,62 @@ struct LockScreenMusicPanel: View {
         formatter.dateFormat = "HH:mm:ss.SSS"
         let styleDescriptor = usesLiquidGlass ? "Liquid Glass" : "Frosted"
         print("[\(formatter.string(from: Date()))] LockScreenMusicPanel: \(event) – \(styleDescriptor)")
+    }
+}
+
+private struct PanelControlButton: View {
+    let icon: String
+    let frameSize: CGFloat
+    let iconSize: CGFloat
+    let iconColor: Color
+    let backgroundOpacity: Double
+    let pressNudge: CGFloat?
+    let action: () -> Void
+
+    @State private var isHovering = false
+    @State private var pressOffset: CGFloat = 0
+
+    var body: some View {
+        Button(action: {
+            triggerPressEffect()
+            action()
+        }) {
+            RoundedRectangle(cornerRadius: frameSize / 2, style: .continuous)
+                .fill(backgroundColor)
+                .overlay(
+                    Image(systemName: icon)
+                        .font(.system(size: iconSize, weight: .medium))
+                        .foregroundStyle(iconColor)
+                        .contentTransition(.symbolEffect(.replace))
+                )
+        }
+        .frame(width: frameSize, height: frameSize)
+        .buttonStyle(PlainButtonStyle())
+        .offset(x: pressOffset)
+        .onHover { hovering in
+            withAnimation(.smooth(duration: 0.24)) {
+                isHovering = hovering
+            }
+        }
+    }
+
+    private var backgroundColor: Color {
+        let hoveredOpacity = max(backgroundOpacity + 0.08, 0.18)
+        let appliedOpacity = isHovering ? hoveredOpacity : backgroundOpacity
+        return Color.white.opacity(min(appliedOpacity, 0.32))
+    }
+
+    private func triggerPressEffect() {
+        guard let pressNudge else { return }
+
+        withAnimation(.spring(response: 0.2, dampingFraction: 0.55)) {
+            pressOffset = pressNudge
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                pressOffset = 0
+            }
+        }
     }
 }

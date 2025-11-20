@@ -38,7 +38,7 @@ final class LockScreenWeatherPanelManager {
         let fittingSize = hostingView.fittingSize
         hostingView.frame = NSRect(origin: .zero, size: fittingSize)
 
-        let targetFrame = frame(for: fittingSize, on: screen)
+        let targetFrame = frame(for: fittingSize, snapshot: snapshot, on: screen)
         let window = ensureWindow()
         window.setFrame(targetFrame, display: true)
         latestFrame = targetFrame
@@ -78,14 +78,18 @@ final class LockScreenWeatherPanelManager {
         return newWindow
     }
 
-    private func frame(for size: CGSize, on screen: NSScreen) -> NSRect {
+    private func frame(for size: CGSize, snapshot: LockScreenWeatherSnapshot, on screen: NSScreen) -> NSRect {
         let screenFrame = screen.frame
         let originX = screenFrame.midX - (size.width / 2)
         let verticalOffset = screenFrame.height * 0.15
         let maxY = screenFrame.maxY - size.height - 48
         let baseY = min(maxY, screenFrame.midY + verticalOffset)
         let loweredY = baseY - 36
-        let clampedY = max(screenFrame.minY + 80, loweredY)
+
+        let inlineLift: CGFloat = snapshot.widgetStyle == .inline ? 28 : 0
+        let adjustedY = loweredY + inlineLift
+        let upperClampedY = min(maxY, adjustedY)
+        let clampedY = max(screenFrame.minY + 80, upperClampedY)
         return NSRect(x: originX, y: clampedY, width: size.width, height: size.height)
     }
 }
