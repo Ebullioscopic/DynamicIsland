@@ -224,7 +224,7 @@ enum MusicAuxiliaryControl: String, CaseIterable, Identifiable, Defaults.Seriali
         case .repeatMode:
             return "repeat"
         case .mediaOutput:
-            return "speaker.wave.2"
+            return "laptopcomputer"
         case .lyrics:
             return "quote.bubble"
         }
