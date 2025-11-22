@@ -33,6 +33,7 @@ class MusicManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var controllerCancellables = Set<AnyCancellable>()
     private var debounceIdleTask: Task<Void, Never>?
+    @MainActor private var pendingOptimisticPlayState: Bool?
 
     // Helper to check if macOS has removed support for NowPlayingController
     public private(set) var isNowPlayingDeprecated: Bool = false
@@ -193,20 +194,38 @@ class MusicManager: ObservableObject {
         forceUpdate()
     }
 
+    @MainActor
+    private func applyPlayState(_ state: Bool, animation: Animation?) {
+        if let animation {
+            var transaction = Transaction()
+            transaction.animation = animation
+            withTransaction(transaction) {
+                self.isPlaying = state
+            }
+        } else {
+            self.isPlaying = state
+        }
+
+        self.updateIdleState(state: state)
+    }
+
     // MARK: - Update Methods
     @MainActor
     private func updateFromPlaybackState(_ state: PlaybackState) {
         // Check for playback state changes (playing/paused)
-        if state.isPlaying != self.isPlaying {
-            NSLog("Playback state changed: \(state.isPlaying ? "Playing" : "Paused")")
-            withAnimation(.smooth) {
-                self.isPlaying = state.isPlaying
-                self.updateIdleState(state: state.isPlaying)
-            }
+        let eventIsPlaying = state.isPlaying
+        let expectedState = pendingOptimisticPlayState
+        pendingOptimisticPlayState = nil
 
-            if state.isPlaying && !state.title.isEmpty && !state.artist.isEmpty {
-                self.updateSneakPeek()
-            }
+        if eventIsPlaying != self.isPlaying {
+            let animation: Animation? = (expectedState == eventIsPlaying) ? .smooth(duration: 0.18) : .smooth
+            applyPlayState(eventIsPlaying, animation: animation)
+        } else {
+            self.updateIdleState(state: eventIsPlaying)
+        }
+
+        if eventIsPlaying && !state.title.isEmpty && !state.artist.isEmpty {
+            self.updateSneakPeek()
         }
 
         // Check for changes in track metadata using last artwork change values
@@ -486,8 +505,16 @@ class MusicManager: ObservableObject {
     }
     
     func togglePlay() {
+        guard let controller = activeController else { return }
+
         Task {
-            await activeController?.togglePlay()
+            await MainActor.run {
+                let newState = !isPlaying
+                pendingOptimisticPlayState = newState
+                applyPlayState(newState, animation: .smooth(duration: 0.18))
+            }
+
+            await controller.togglePlay()
         }
     }
 

@@ -6817,6 +6817,9 @@
         }
       }
     },
+    "Displays play/pause and skip buttons beside the notch while music is active. Disabled by default." : {
+
+    },
     "Do Not Disturb" : {
 
     },

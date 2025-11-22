@@ -71,16 +71,42 @@ struct ContentView: View {
     @State private var lastHapticTime: Date = Date()
 
     @State private var gestureProgress: CGFloat = .zero
+    @State private var isMusicControlWindowVisible = false
+    @State private var pendingMusicControlTask: Task<Void, Never>?
+    @State private var musicControlHideTask: Task<Void, Never>?
+    @State private var musicControlVisibilityDeadline: Date?
+    @State private var isMusicControlWindowSuppressed = false
+    @State private var hasPendingMusicControlSync = false
+    @State private var pendingMusicControlForceRefresh = false
+    @State private var musicControlSuppressionTask: Task<Void, Never>?
 
     @State private var haptics: Bool = false
 
     @Namespace var albumArtNamespace
 
     @Default(.useMusicVisualizer) var useMusicVisualizer
-
+    @Default(.musicControlWindowEnabled) var musicControlWindowEnabled
     @Default(.showNotHumanFace) var showNotHumanFace
     @Default(.useModernCloseAnimation) var useModernCloseAnimation
     @Default(.enableMinimalisticUI) var enableMinimalisticUI
+
+    private static let musicControlLogFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        return formatter
+    }()
+
+    private func logMusicControlEvent(_ message: String) {
+#if DEBUG
+        let timestamp = Self.musicControlLogFormatter.string(from: Date())
+        print("[MusicControl] \(timestamp): \(message)")
+#endif
+    }
+
+    private func requestMusicControlWindowSyncIfHidden(forceRefresh: Bool = false, delay: TimeInterval = 0) {
+        guard !isMusicControlWindowVisible else { return }
+        enqueueMusicControlWindowSync(forceRefresh: forceRefresh, delay: delay)
+    }
     private var dynamicNotchResizeAnimation: Animation? {
         if enableMinimalisticUI && reminderManager.activeWindowReminders.isEmpty == false {
             return nil
@@ -91,6 +117,8 @@ struct ContentView: View {
     private let extendedHoverPadding: CGFloat = 30
     private let zeroHeightHoverPadding: CGFloat = 10
     private let statsAdditionalRowHeight: CGFloat = 110
+    private let musicControlPauseGrace: TimeInterval = 5
+    private let musicControlResumeDelay: TimeInterval = 0.24
     
     // Use minimalistic corner radius ONLY when opened, keep normal when closed
     private var activeCornerRadiusInsets: (opened: (top: CGFloat, bottom: CGFloat), closed: (top: CGFloat, bottom: CGFloat)) {
@@ -368,6 +396,95 @@ struct ContentView: View {
         .background(dragDetector)
         .environmentObject(vm)
         .environmentObject(webcamManager)
+        .onAppear {
+            isMusicControlWindowSuppressed = vm.notchState != .closed || lockScreenManager.isLocked
+            if musicManager.isPlaying || !musicManager.isPlayerIdle {
+                clearMusicControlVisibilityDeadline()
+            }
+            if let deadline = musicControlVisibilityDeadline, Date() > deadline {
+                clearMusicControlVisibilityDeadline()
+            }
+            enqueueMusicControlWindowSync(forceRefresh: true)
+        }
+        .onChange(of: vm.notchState) { _, state in
+            if state == .open {
+                suppressMusicControlWindowUpdates()
+                cancelMusicControlWindowSync()
+                hideMusicControlWindow()
+            } else {
+                releaseMusicControlWindowUpdates(after: musicControlResumeDelay)
+                enqueueMusicControlWindowSync(forceRefresh: true, delay: 0.05)
+            }
+        }
+        .onChange(of: musicControlWindowEnabled) { _, enabled in
+            if enabled {
+                if musicManager.isPlaying || !musicManager.isPlayerIdle {
+                    clearMusicControlVisibilityDeadline()
+                }
+                enqueueMusicControlWindowSync(forceRefresh: true)
+            } else {
+                cancelMusicControlWindowSync()
+                hideMusicControlWindow()
+                clearMusicControlVisibilityDeadline()
+                hasPendingMusicControlSync = false
+                pendingMusicControlForceRefresh = false
+            }
+        }
+        .onChange(of: coordinator.musicLiveActivityEnabled) { _, enabled in
+            if enabled {
+                enqueueMusicControlWindowSync(forceRefresh: true)
+            } else {
+                cancelMusicControlWindowSync()
+                hideMusicControlWindow()
+                clearMusicControlVisibilityDeadline()
+                hasPendingMusicControlSync = false
+                pendingMusicControlForceRefresh = false
+            }
+        }
+        .onChange(of: vm.hideOnClosed) { _, hidden in
+            if hidden {
+                cancelMusicControlWindowSync()
+                hideMusicControlWindow()
+            } else {
+                enqueueMusicControlWindowSync(forceRefresh: true, delay: 0.05)
+            }
+        }
+        .onChange(of: lockScreenManager.isLocked) { _, locked in
+            if locked {
+                suppressMusicControlWindowUpdates()
+                cancelMusicControlWindowSync()
+                hideMusicControlWindow()
+            } else {
+                releaseMusicControlWindowUpdates(after: musicControlResumeDelay)
+                enqueueMusicControlWindowSync(forceRefresh: true, delay: 0.05)
+            }
+        }
+        .onChange(of: gestureProgress) { _, _ in
+            if shouldShowMusicControlWindow() {
+                enqueueMusicControlWindowSync(forceRefresh: true, delay: 0.05)
+            }
+        }
+        .onChange(of: isHovering) { _, hovering in
+            if shouldShowMusicControlWindow() {
+                enqueueMusicControlWindowSync(forceRefresh: true, delay: hovering ? 0.05 : 0.12)
+            }
+        }
+        .onChange(of: musicManager.isPlaying) { _, isPlaying in
+            handleMusicControlPlaybackChange(isPlaying: isPlaying)
+        }
+        .onChange(of: musicManager.isPlayerIdle) { _, isIdle in
+            handleMusicControlIdleChange(isIdle: isIdle)
+        }
+        .onChange(of: vm.closedNotchSize) { _, _ in
+            if shouldShowMusicControlWindow() {
+                enqueueMusicControlWindowSync(forceRefresh: true)
+            }
+        }
+        .onChange(of: vm.effectiveClosedNotchHeight) { _, _ in
+            if shouldShowMusicControlWindow() {
+                enqueueMusicControlWindowSync(forceRefresh: true)
+            }
+        }
         .onDisappear {
             // Clean up all timer work items to prevent memory leaks and conflicts
             hoverWorkItem?.cancel()
@@ -375,6 +492,11 @@ struct ContentView: View {
             statsTransitionWorkItem?.cancel()
             viewTransitionWorkItem?.cancel()
             sizeChangeWorkItem?.cancel()
+            cancelMusicControlWindowSync()
+            hideMusicControlWindow()
+            cancelMusicControlVisibilityTimer()
+            clearMusicControlVisibilityDeadline()
+            musicControlSuppressionTask?.cancel()
         }
     }
 
@@ -910,6 +1032,247 @@ struct ContentView: View {
             }
         }
     }
+
+    private func handleMusicControlPlaybackChange(isPlaying: Bool) {
+        guard musicControlWindowEnabled else { return }
+
+        if isPlaying {
+            clearMusicControlVisibilityDeadline()
+            requestMusicControlWindowSyncIfHidden()
+        } else {
+            extendMusicControlVisibilityAfterPause()
+        }
+    }
+
+    private func handleMusicControlIdleChange(isIdle: Bool) {
+        guard musicControlWindowEnabled else { return }
+
+        if isIdle {
+            if musicControlVisibilityDeadline == nil {
+                extendMusicControlVisibilityAfterPause()
+            }
+        } else if musicManager.isPlaying {
+            clearMusicControlVisibilityDeadline()
+        }
+    }
+
+    private func extendMusicControlVisibilityAfterPause() {
+        let deadline = Date().addingTimeInterval(musicControlPauseGrace)
+        musicControlVisibilityDeadline = deadline
+        scheduleMusicControlVisibilityCheck(deadline: deadline)
+        requestMusicControlWindowSyncIfHidden()
+    }
+
+    private func clearMusicControlVisibilityDeadline() {
+        musicControlVisibilityDeadline = nil
+        cancelMusicControlVisibilityTimer()
+    }
+
+    private func scheduleMusicControlVisibilityCheck(deadline: Date) {
+        cancelMusicControlVisibilityTimer()
+
+        let interval = max(0, deadline.timeIntervalSinceNow)
+
+        musicControlHideTask = Task.detached(priority: .background) { [interval] in
+            if interval > 0 {
+                let nanoseconds = UInt64(interval * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: nanoseconds)
+            }
+
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                if let currentDeadline = musicControlVisibilityDeadline, currentDeadline <= Date() {
+                    musicControlVisibilityDeadline = nil
+                }
+
+                enqueueMusicControlWindowSync(forceRefresh: false)
+
+                musicControlHideTask = nil
+            }
+        }
+    }
+
+    private func cancelMusicControlVisibilityTimer() {
+        musicControlHideTask?.cancel()
+        musicControlHideTask = nil
+    }
+
+    private func musicControlVisibilityIsActive() -> Bool {
+        if musicManager.isPlaying {
+            return true
+        }
+
+        guard let deadline = musicControlVisibilityDeadline else { return false }
+        return Date() <= deadline
+    }
+
+    private func suppressMusicControlWindowUpdates() {
+        isMusicControlWindowSuppressed = true
+        musicControlSuppressionTask?.cancel()
+        musicControlSuppressionTask = nil
+    }
+
+    private func releaseMusicControlWindowUpdates(after delay: TimeInterval) {
+        musicControlSuppressionTask?.cancel()
+        musicControlSuppressionTask = Task { [delay] in
+            if delay > 0 {
+                let nanoseconds = UInt64(delay * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: nanoseconds)
+            }
+
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                if vm.notchState == .closed && !lockScreenManager.isLocked {
+                    isMusicControlWindowSuppressed = false
+                    triggerPendingMusicControlSyncIfNeeded()
+                } else {
+                    isMusicControlWindowSuppressed = true
+                }
+                musicControlSuppressionTask = nil
+            }
+        }
+    }
+
+    private func triggerPendingMusicControlSyncIfNeeded() {
+        guard hasPendingMusicControlSync else { return }
+
+        let shouldForce = pendingMusicControlForceRefresh
+        hasPendingMusicControlSync = false
+        pendingMusicControlForceRefresh = false
+
+        logMusicControlEvent("Flushing pending floating window sync (force: \(shouldForce))")
+        scheduleMusicControlWindowSync(forceRefresh: shouldForce, bypassSuppression: true)
+    }
+
+    private func shouldDeferMusicControlSync() -> Bool {
+        vm.notchState != .closed || lockScreenManager.isLocked || isMusicControlWindowSuppressed
+    }
+
+    private func enqueueMusicControlWindowSync(forceRefresh: Bool, delay: TimeInterval = 0) {
+        if shouldDeferMusicControlSync() {
+            hasPendingMusicControlSync = true
+            if forceRefresh {
+                pendingMusicControlForceRefresh = true
+            }
+            logMusicControlEvent("Queued floating window sync (force: \(forceRefresh)) while deferred")
+            return
+        }
+
+        logMusicControlEvent("Scheduling floating window sync (force: \(forceRefresh), delay: \(delay))")
+        scheduleMusicControlWindowSync(forceRefresh: forceRefresh, delay: delay)
+    }
+
+    private func shouldShowMusicControlWindow() -> Bool {
+        guard musicControlWindowEnabled,
+              coordinator.musicLiveActivityEnabled,
+              vm.notchState == .closed,
+              !vm.hideOnClosed,
+              !lockScreenManager.isLocked,
+              !isMusicControlWindowSuppressed else {
+            return false
+        }
+
+        return musicControlVisibilityIsActive()
+    }
+
+    private func scheduleMusicControlWindowSync(forceRefresh: Bool, delay: TimeInterval = 0, bypassSuppression: Bool = false) {
+        #if os(macOS)
+        cancelMusicControlWindowSync()
+
+        guard shouldShowMusicControlWindow() else {
+            hasPendingMusicControlSync = false
+            pendingMusicControlForceRefresh = false
+            hideMusicControlWindow()
+            return
+        }
+
+        if !bypassSuppression && (isMusicControlWindowSuppressed || lockScreenManager.isLocked) {
+            hasPendingMusicControlSync = true
+            if forceRefresh {
+                pendingMusicControlForceRefresh = true
+            }
+            return
+        }
+
+        hasPendingMusicControlSync = false
+        pendingMusicControlForceRefresh = false
+
+        let syncDelay = max(0, delay)
+
+        pendingMusicControlTask = Task.detached(priority: .userInitiated) { [forceRefresh, syncDelay] in
+            if syncDelay > 0 {
+                let nanoseconds = UInt64(syncDelay * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: nanoseconds)
+            }
+
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                if shouldShowMusicControlWindow() {
+                    logMusicControlEvent("Running floating window sync (force: \(forceRefresh))")
+                    syncMusicControlWindow(forceRefresh: forceRefresh)
+                } else {
+                    logMusicControlEvent("Skipping floating window sync (conditions changed)")
+                    hideMusicControlWindow()
+                }
+
+                pendingMusicControlTask = nil
+            }
+        }
+        #endif
+    }
+
+    private func cancelMusicControlWindowSync() {
+        pendingMusicControlTask?.cancel()
+        pendingMusicControlTask = nil
+    }
+
+    #if os(macOS)
+    private func currentMusicControlWindowMetrics() -> MusicControlWindowMetrics {
+        MusicControlWindowMetrics(
+            notchHeight: max(vm.closedNotchSize.height, vm.effectiveClosedNotchHeight),
+            notchWidth: vm.closedNotchSize.width + (isHovering ? 8 : 0),
+            rightWingWidth: max(0, vm.effectiveClosedNotchHeight - (isHovering ? 0 : 12) + gestureProgress / 2),
+            cornerRadius: activeCornerRadiusInsets.closed.bottom,
+            spacing: 36
+        )
+    }
+
+    private func syncMusicControlWindow(forceRefresh: Bool = false) {
+        let notchAvailable = vm.effectiveClosedNotchHeight > 0 && vm.closedNotchSize.width > 0
+        let targetVisible = shouldShowMusicControlWindow() && notchAvailable
+
+        if targetVisible {
+            let metrics = currentMusicControlWindowMetrics()
+            if !isMusicControlWindowVisible {
+                let didPresent = MusicControlWindowManager.shared.present(using: vm, metrics: metrics)
+                isMusicControlWindowVisible = didPresent
+            } else if forceRefresh {
+                let didRefresh = MusicControlWindowManager.shared.refresh(using: vm, metrics: metrics)
+                if !didRefresh {
+                    MusicControlWindowManager.shared.hide()
+                    isMusicControlWindowVisible = false
+                }
+            }
+        } else if isMusicControlWindowVisible {
+            MusicControlWindowManager.shared.hide()
+            isMusicControlWindowVisible = false
+        }
+    }
+
+    private func hideMusicControlWindow() {
+        if isMusicControlWindowVisible {
+            MusicControlWindowManager.shared.hide()
+            isMusicControlWindowVisible = false
+        }
+    }
+    #else
+    private func syncMusicControlWindow(forceRefresh: Bool = false) {}
+
+    private func hideMusicControlWindow() {}
+    #endif
 }
 
 struct FullScreenDropDelegate: DropDelegate {

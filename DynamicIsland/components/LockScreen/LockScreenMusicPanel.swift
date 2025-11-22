@@ -711,8 +711,8 @@ struct LockScreenMusicPanel: View {
         if #available(macOS 26.0, *) {
             RoundedRectangle(cornerRadius: panelCornerRadius)
                 .glassEffect(
-                    .regular
-                        .tint(Color.white.opacity(0.12))
+                    .clear
+                        //.tint(Color.white.opacity(0.12))
                         .interactive(),
                     in: .rect(cornerRadius: panelCornerRadius)
                 )
@@ -739,8 +739,8 @@ struct LockScreenMusicPanel: View {
                 if #available(macOS 26.0, *) {
                     RoundedRectangle(cornerRadius: cornerRadius)
                         .glassEffect(
-                            .regular
-                                .tint(Color.white.opacity(0.16))
+                            .clear
+                                //.tint(Color.white.opacity(0.16))
                                 .interactive(),
                             in: .rect(cornerRadius: cornerRadius)
                         )

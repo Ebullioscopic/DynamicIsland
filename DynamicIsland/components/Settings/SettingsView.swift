@@ -858,6 +858,7 @@ struct Media: View {
     @Default(.musicAuxLeftControl) private var musicAuxLeftControl
     @Default(.musicAuxRightControl) private var musicAuxRightControl
     @Default(.musicSkipBehavior) private var musicSkipBehavior
+    @Default(.musicControlWindowEnabled) private var musicControlWindowEnabled
     @State private var previousLeftAuxControl: MusicAuxiliaryControl = Defaults[.musicAuxLeftControl]
     @State private var previousRightAuxControl: MusicAuxiliaryControl = Defaults[.musicAuxRightControl]
 
@@ -938,6 +939,12 @@ struct Media: View {
                     "Enable music live activity",
                     isOn: $coordinator.musicLiveActivityEnabled.animation()
                 )
+                Defaults.Toggle(
+                    "Show floating media controls",
+                    key: .musicControlWindowEnabled
+                )
+                .disabled(!coordinator.musicLiveActivityEnabled)
+                .help("Displays play/pause and skip buttons beside the notch while music is active. Disabled by default.")
                 Toggle("Enable sneak peek", isOn: $enableSneakPeek)
                 Defaults.Toggle("Enable lyrics", key: .enableLyrics)
                 Picker("Sneak Peek Style", selection: $sneakPeekStyles){
