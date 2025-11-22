@@ -904,16 +904,7 @@ struct Media: View {
                 }
                 .disabled(!showShuffleAndRepeat)
                 if showShuffleAndRepeat {
-                    Picker("Left button", selection: $musicAuxLeftControl) {
-                        ForEach(MusicAuxiliaryControl.allCases) { control in
-                            Text(control.displayName).tag(control)
-                        }
-                    }
-                    Picker("Right button", selection: $musicAuxRightControl) {
-                        ForEach(MusicAuxiliaryControl.allCases) { control in
-                            Text(control.displayName).tag(control)
-                        }
-                    }
+                    mediaControlsGrid
                 }
             } header: {
                 Text("Media controls")
@@ -1008,6 +999,102 @@ struct Media: View {
             }
         }
         .navigationTitle("Media")
+    }
+
+    private var mediaControlsGrid: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            mediaControlsRow(title: "Left button", selection: $musicAuxLeftControl, otherSelection: musicAuxRightControl)
+            mediaControlsRow(title: "Right button", selection: $musicAuxRightControl, otherSelection: musicAuxLeftControl)
+        }
+        .padding(.vertical, 12)
+    }
+
+    private func mediaControlsRow(title: String, selection: Binding<MusicAuxiliaryControl>, otherSelection: MusicAuxiliaryControl) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+
+            HStack(spacing: 16) {
+                ForEach([MusicAuxiliaryControl.mediaOutput, MusicAuxiliaryControl.repeatMode, MusicAuxiliaryControl.lyrics, MusicAuxiliaryControl.shuffle], id: \.self) { control in
+                    MediaControlButton(
+                        control: control,
+                        isSelected: selection.wrappedValue == control,
+                        disabled: control == otherSelection
+                    ) {
+                        selection.wrappedValue = control
+                    }
+                }
+            }
+        }
+    }
+
+    struct MediaControlButton: View {
+        let control: MusicAuxiliaryControl
+        let isSelected: Bool
+        let disabled: Bool
+        let action: () -> Void
+        
+        @State private var isHovering = false
+        
+        var body: some View {
+            VStack(spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(backgroundColor)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(borderColor, lineWidth: isSelected ? 2 : 1)
+                        )
+                    
+                    Image(systemName: control.symbolName)
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(iconColor)
+                }
+                .frame(width: 80, height: 60)
+                .onHover { hovering in
+                    if !disabled {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isHovering = hovering
+                        }
+                    }
+                }
+                
+                Text(control.displayName)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .frame(width: 100)
+                    .foregroundStyle(disabled ? .secondary : .primary)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if !disabled {
+                    action()
+                }
+            }
+            .opacity(disabled ? 0.5 : 1.0)
+        }
+        
+        private var backgroundColor: Color {
+            if disabled { return Color(nsColor: .controlBackgroundColor) }
+            if isSelected { return Color.accentColor.opacity(0.1) }
+            if isHovering { return Color.primary.opacity(0.05) }
+            return Color(nsColor: .controlBackgroundColor)
+        }
+        
+        private var borderColor: Color {
+            if isSelected { return Color.accentColor }
+            if isHovering { return Color.primary.opacity(0.1) }
+            return Color.clear
+        }
+        
+        private var iconColor: Color {
+            if disabled { return .secondary }
+            if isSelected { return .accentColor }
+            return .primary
+        }
     }
 
     // Only show controller options that are available on this macOS version
@@ -2106,34 +2193,34 @@ struct TimerSettings: View {
         let nextIndex = timerPresets.count + 1
         let defaultColor = Defaults[.accentColor]
         let newPreset = TimerPreset(name: "Preset \(nextIndex)", duration: 5 * 60, color: defaultColor)
-        _ = withAnimation(.smooth) {
+        withAnimation(.smooth) {
             timerPresets.append(newPreset)
         }
     }
     
     private func movePresetUp(_ index: Int) {
         guard index > timerPresets.startIndex else { return }
-        _ = withAnimation(.smooth) {
+        withAnimation(.smooth) {
             timerPresets.swapAt(index, index - 1)
         }
     }
     
     private func movePresetDown(_ index: Int) {
         guard index < timerPresets.index(before: timerPresets.endIndex) else { return }
-        _ = withAnimation(.smooth) {
+        withAnimation(.smooth) {
             timerPresets.swapAt(index, index + 1)
         }
     }
     
     private func removePreset(_ index: Int) {
         guard timerPresets.indices.contains(index) else { return }
-        _ = withAnimation(.smooth) {
+        withAnimation(.smooth) {
             timerPresets.remove(at: index)
         }
     }
     
     private func resetPresets() {
-        _ = withAnimation(.smooth) {
+        withAnimation(.smooth) {
             timerPresets = TimerPreset.defaultPresets
         }
     }
@@ -2386,7 +2473,7 @@ struct StatsSettings: View {
 
                 Section {
                     Defaults.Toggle("CPU Usage", key: .showCpuGraph)
-                    Defaults.Toggle("Memory Usage", key: .showMemoryGraph) 
+                    Defaults.Toggle("Memory Usage", key: .showMemoryGraph)
                     Defaults.Toggle("GPU Usage", key: .showGpuGraph)
                     Defaults.Toggle("Network Activity", key: .showNetworkGraph)
                     Defaults.Toggle("Disk I/O", key: .showDiskGraph)
